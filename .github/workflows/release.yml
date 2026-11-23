@@ -42,8 +42,8 @@ jobs:
 
   build-desktop:
     needs: verify
-    fail-fast: false
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: windows-latest
