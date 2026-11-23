@@ -1,0 +1,8 @@
+{
+  "name": "ChUno",
+  "description": "3D turn-based tactical Chess + UNO + survival roulette thriller featuring Light Mode and Survival Mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

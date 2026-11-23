@@ -1,0 +1,27 @@
+# Dependencies & build output
+node_modules/
+dist/
+.vite/
+.turbo/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs & OS artifacts
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Verification / debug artifacts
+.aistudio/
+verify_*
+v14_*.png
+
+# Third-party copyrighted music tracks excluded from Public repository
+# (musicManager.ts safely falls back when folders are empty)
+src/assets/audio/music/friendly_background/school_rooftop.ogg
+src/assets/audio/music/unknown/robert_davis_kauai.ogg
