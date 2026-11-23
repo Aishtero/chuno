@@ -82,31 +82,33 @@ jobs:
       - name: Install Node dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Build Tauri desktop installers
+      - name: Build signed Tauri desktop installers
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           NO_STRIP: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --bundles ${{ matrix.bundles }}
 
-      - name: Collect Windows installers
+      - name: Collect Windows installers & signatures
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-stage | Out-Null
-          Get-ChildItem -Path "src-tauri\target\release\bundle\nsis" -Filter "*.exe" | Copy-Item -Destination "release-stage"
-          Get-ChildItem -Path "src-tauri\target\release\bundle\msi" -Filter "*.msi" | Copy-Item -Destination "release-stage"
+          Get-ChildItem -Path "src-tauri\target\release\bundle\nsis" -Include "*.exe","*.sig" -Recurse | Copy-Item -Destination "release-stage"
+          Get-ChildItem -Path "src-tauri\target\release\bundle\msi" -Include "*.msi","*.sig" -Recurse | Copy-Item -Destination "release-stage"
           Get-ChildItem -Path "release-stage" | Format-Table Name, Length
 
-      - name: Collect Linux packages
+      - name: Collect Linux packages & signatures
         if: matrix.platform == 'ubuntu-22.04'
         shell: bash
         run: |
           mkdir -p release-stage
-          cp src-tauri/target/release/bundle/appimage/*.AppImage release-stage/
-          cp src-tauri/target/release/bundle/deb/*.deb release-stage/
+          cp src-tauri/target/release/bundle/appimage/*.AppImage* release-stage/
+          cp src-tauri/target/release/bundle/deb/*.deb* release-stage/
           ls -lh release-stage/
 
-      - name: Upload built installers
+      - name: Upload built installers & signatures
         uses: actions/upload-artifact@v4
         with:
           name: chuno-installers-${{ matrix.target_name }}
@@ -117,19 +119,72 @@ jobs:
     needs: build-desktop
     runs-on: ubuntu-latest
     steps:
-      - name: Download all platform installers
+      - name: Download all platform installers & signatures
         uses: actions/download-artifact@v4
         with:
           pattern: chuno-installers-*
           merge-multiple: true
           path: release-assets
 
-      - name: Generate SHA256SUMS.txt
+      - name: Generate unified Tauri updater latest.json & SHA256SUMS.txt
         shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          REPO_SLUG: ${{ github.repository }}
         run: |
           cd release-assets
           ls -lh
-          sha256sum * > SHA256SUMS.txt
+          node -e '
+            const fs = require("fs");
+            const tag = process.env.TAG_NAME || "v0.2.2";
+            const version = tag.replace(/^v/, "");
+            const repo = process.env.REPO_SLUG || "Aishtero/chuno";
+            const baseUrl = `https://github.com/${repo}/releases/download/${tag}`;
+            const files = fs.readdirSync(".");
+            const findFile = (ext) => files.find((f) => f.endsWith(ext) && !f.endsWith(".sig"));
+            const readSig = (file) => {
+              if (!file) return null;
+              const sigPath = `${file}.sig`;
+              return fs.existsSync(sigPath) ? fs.readFileSync(sigPath, "utf8").trim() : null;
+            };
+            const exe = findFile(".exe");
+            const msi = findFile(".msi");
+            const appImage = findFile(".AppImage");
+            const deb = findFile(".deb");
+            const exeSig = readSig(exe);
+            const msiSig = readSig(msi);
+            const appImageSig = readSig(appImage);
+            const debSig = readSig(deb);
+            const platforms = {};
+            if (exe && exeSig) {
+              platforms["windows-x86_64"] = { signature: exeSig, url: `${baseUrl}/${exe}` };
+              platforms["windows-x86_64-nsis"] = { signature: exeSig, url: `${baseUrl}/${exe}` };
+            }
+            if (msi && msiSig) {
+              platforms["windows-x86_64-msi"] = { signature: msiSig, url: `${baseUrl}/${msi}` };
+            }
+            if (appImage && appImageSig) {
+              platforms["linux-x86_64"] = { signature: appImageSig, url: `${baseUrl}/${appImage}` };
+              platforms["linux-x86_64-appimage"] = { signature: appImageSig, url: `${baseUrl}/${appImage}` };
+            }
+            if (deb && debSig) {
+              platforms["linux-x86_64-deb"] = { signature: debSig, url: `${baseUrl}/${deb}` };
+            }
+            if (!platforms["windows-x86_64"] || !platforms["linux-x86_64"]) {
+              console.error("Missing required signed updater platforms in latest.json:", Object.keys(platforms));
+              process.exit(1);
+            }
+            const latest = {
+              version,
+              notes: `ChUno ${tag} — Atomic disk-backed saves, in-app auto-updater, and audio/mobile enhancements.`,
+              pub_date: new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync("latest.json", JSON.stringify(latest, null, 2) + "\n");
+            console.log("Generated latest.json:");
+            console.log(fs.readFileSync("latest.json", "utf8"));
+          '
+          sha256sum *.exe *.msi *.AppImage *.deb latest.json > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Publish GitHub Release

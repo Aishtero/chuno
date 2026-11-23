@@ -1,8 +1,10 @@
 import React from 'react';
-import { BookOpen, Code2, Trophy, Volume2, VolumeX } from 'lucide-react';
+import { BookOpen, Code2, RefreshCw, Sparkles, Trophy, Volume2, VolumeX } from 'lucide-react';
 import { soundManager } from '../audio/soundManager';
 import { DifficultyLevel, GameMode, LightPersonality } from '../core/deck/cardData';
 import { Language, getTranslations } from '../core/localization';
+import { APP_VERSION } from '../core/profileManager';
+import { WebGuestGateStatus } from '../core/webGuestGate';
 
 interface TitleScreenProps {
   mode: GameMode;
@@ -10,6 +12,10 @@ interface TitleScreenProps {
   personality: LightPersonality;
   language: Language;
   muted: boolean;
+  isTauri: boolean;
+  guestStatus: WebGuestGateStatus;
+  hasUpdateAvailable?: boolean;
+  onCheckUpdates?: () => void;
   onChangeMode: (mode: GameMode) => void;
   onChangeDifficulty: (diff: DifficultyLevel) => void;
   onChangePersonality: (p: LightPersonality) => void;
@@ -27,6 +33,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
   personality,
   language,
   muted,
+  isTauri,
+  guestStatus,
+  hasUpdateAvailable,
+  onCheckUpdates,
   onChangeMode,
   onChangeDifficulty,
   onChangePersonality,
@@ -39,6 +49,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
 }) => {
   const t = getTranslations(language);
   const isSurv = mode === 'survival';
+  const isRu = language === 'ru';
 
   const clickThen = (fn: () => void) => {
     soundManager.playClick();
@@ -47,14 +58,14 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
 
   return (
     <div
-      className={`fixed inset-0 z-10 pointer-events-none flex flex-col justify-between px-8 py-7 md:px-14 md:py-10 transition-colors duration-300 ${
+      className={`fixed inset-0 z-10 pointer-events-none flex flex-col justify-between px-4 py-4 sm:px-8 sm:py-7 md:px-14 md:py-10 transition-colors duration-300 ${
         isSurv
           ? 'bg-gradient-to-r from-[#080606]/90 via-[#080606]/48 via-32% to-transparent text-[#eae3d5]'
           : 'bg-gradient-to-r from-[#f4ece0]/86 via-[#f4ece0]/38 via-30% to-transparent text-[#1f2923]'
       }`}
     >
-      {/* Top Bar: clean EN | RU + Rules & Sound */}
-      <header className="flex items-center justify-between pointer-events-auto">
+      {/* Top Bar: clean EN | RU + Guest/Desktop badge + Rules & Sound */}
+      <header className="flex flex-wrap items-center justify-between gap-2 pointer-events-auto">
         <div className="inline-flex items-center gap-2 text-xs tracking-wider" role="group" aria-label="Language">
           <button
             type="button"
@@ -89,14 +100,32 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
           >
             RU
           </button>
+
+          {!isTauri && guestStatus.isGuestMode && (
+            <span
+              data-testid="web-guest-badge"
+              className={`ml-1.5 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono-num text-[11px] font-semibold ${
+                isSurv
+                  ? 'border-amber-500/35 bg-stone-950/75 text-amber-300'
+                  : 'border-[#2e4738]/25 bg-white/75 text-[#1f3327]'
+              }`}
+            >
+              <Sparkles className="w-3 h-3 opacity-80" />
+              <span>
+                {isRu
+                  ? `Гость · ${guestStatus.matchesPlayed}/${guestStatus.maxMatches} партий`
+                  : `Guest · ${guestStatus.matchesPlayed}/${guestStatus.maxMatches} matches`}
+              </span>
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-6">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-6">
           <button
             type="button"
             data-testid="open-leaderboard"
             onClick={() => clickThen(onOpenLeaderboard)}
-            className={`inline-flex items-center gap-2 py-1.5 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 py-1.5 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               isSurv
                 ? 'text-amber-300/90 hover:text-amber-200'
                 : 'text-[#2b4235] hover:text-[#141c17]'
@@ -109,7 +138,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
           <button
             type="button"
             onClick={() => clickThen(onOpenRules)}
-            className={`inline-flex items-center gap-2 py-1.5 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 py-1.5 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               isSurv
                 ? 'text-stone-300 hover:text-[#f5efe6]'
                 : 'text-[#313f36] hover:text-[#141c17]'
@@ -267,8 +296,43 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
         </button>
       </main>
 
-      {/* Bottom row: empty left, discreet unobtrusive Godot link in bottom-right corner */}
-      <footer className="flex items-center justify-end pointer-events-auto">
+      {/* Bottom row: version / updater badge on left (in Tauri), discreet Godot link in bottom-right corner */}
+      <footer className="flex items-center justify-between gap-3 pointer-events-auto">
+        {isTauri && onCheckUpdates ? (
+          <button
+            type="button"
+            data-testid="title-check-updates"
+            onClick={() => clickThen(onCheckUpdates)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-mono-num font-semibold transition-colors cursor-pointer ${
+              hasUpdateAvailable
+                ? 'border-amber-500 bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                : isSurv
+                  ? 'border-stone-800 bg-stone-950/70 text-stone-400 hover:text-stone-200'
+                  : 'border-stone-400/40 bg-white/70 text-stone-700 hover:text-stone-950'
+            }`}
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>
+              v{APP_VERSION} ·{' '}
+              {hasUpdateAvailable
+                ? isRu
+                  ? 'Доступно обновление'
+                  : 'Update available'
+                : isRu
+                  ? 'Проверить обновления'
+                  : 'Check updates'}
+            </span>
+          </button>
+        ) : (
+          <span
+            className={`text-[11px] font-mono-num opacity-45 ${
+              isSurv ? 'text-stone-400' : 'text-stone-700'
+            }`}
+          >
+            v{APP_VERSION}
+          </span>
+        )}
+
         <button
           type="button"
           onClick={() => clickThen(onOpenGodot)}

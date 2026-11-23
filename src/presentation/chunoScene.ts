@@ -2940,19 +2940,26 @@ export class ChUnoSceneController {
     this.freeLookYaw = THREE.MathUtils.damp(this.freeLookYaw, targetYaw, 6, dt);
     this.freeLookPitch = THREE.MathUtils.damp(this.freeLookPitch, targetPitch, 6, dt);
 
+    const aspect = Math.max(0.42, this.camera.aspect);
+    const portraitPullback = aspect < 1.0 ? (1.0 - aspect) * 1.75 : 0;
+
     switch (this.cameraPreset) {
       case 'CAM_TITLE':
-        _desiredPos.set(Math.sin(t * 0.25) * 0.3 + 1.85, 1.84, 2.68);
-        _desiredLook.set(-0.46, 0.56, -0.45);
+        _desiredPos.set(
+          Math.sin(t * 0.25) * 0.3 + 1.85,
+          1.84 + portraitPullback * 0.45,
+          2.68 + portraitPullback,
+        );
+        _desiredLook.set(-0.46 * Math.min(1, aspect), 0.56, -0.45);
         break;
       case 'CAM_IDLE':
-        _desiredPos.set(0, 1.82, 2.52);
+        _desiredPos.set(0, 1.82 + portraitPullback * 0.48, 2.52 + portraitPullback * 1.05);
         _desiredLook.set(0, 0.64, -0.72);
         break;
       case 'CAM_BOARD_TACTICAL': {
         // Compute camera distance from aspect & FOV so all 64 squares + frame + pieces fit comfortably with clean margins
         const tanHalfV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5));
-        const tanHalfH = tanHalfV * Math.max(0.65, this.camera.aspect);
+        const tanHalfH = tanHalfV * aspect;
         const spanW = BOARD_SPAN + 1.15;
         const spanH = BOARD_SPAN + 1.15;
         const distV = spanH / (2 * tanHalfV);
@@ -2964,7 +2971,7 @@ export class ChUnoSceneController {
         break;
       }
       case 'CAM_CARD_DRAW':
-        _desiredPos.set(0.28, 1.56, 1.85);
+        _desiredPos.set(0.28, 1.56 + portraitPullback * 0.35, 1.85 + portraitPullback * 0.75);
         _desiredLook.set(0.12, 0.92, 0.85);
         break;
       case 'CAM_COIN_FLIP': {

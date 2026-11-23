@@ -8,6 +8,8 @@ import { GodotModal } from './components/GodotModal';
 import { LeaderDashboardModal } from './components/LeaderDashboardModal';
 import { RulesModal } from './components/RulesModal';
 import { TitleScreen } from './components/TitleScreen';
+import { UpdaterModal } from './components/UpdaterModal';
+import { WebGuestModal } from './components/WebGuestModal';
 import { AchievementDefinition, MatchScoreBreakdown } from './core/achievements';
 import { AIDifficulty, evaluateBoard } from './core/chess/chessAI';
 import { leaderboardService } from './core/leaderboardService';
@@ -47,10 +49,24 @@ import {
 } from './core/match/matchEngine';
 import {
   PlayerProfile,
+  exportProfileToJson,
+  hydrateProfileFromTauriDisk,
+  isTauriRuntime,
   loadProfile,
+  parseAndValidateImportedProfile,
   recordMatchOutcomeDetailed,
   saveProfile,
 } from './core/profileManager';
+import {
+  AvailableAppUpdate,
+  checkForDesktopUpdate,
+} from './core/updaterService';
+import {
+  WebGuestGateStatus,
+  getChunoDownloadUrl,
+  getWebGuestStatus,
+  recordWebGuestMatchCompleted,
+} from './core/webGuestGate';
 import {
   CameraPreset,
   ChUnoSceneController,
@@ -111,6 +127,19 @@ export default function App() {
   const [showGodot, setShowGodot] = useState(false);
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState<'leaderboard' | 'achievements' | null>(null);
+
+  const isTauri = isTauriRuntime();
+  const [guestStatus, setGuestStatus] = useState<WebGuestGateStatus>(() => getWebGuestStatus());
+  const [showGuestModal, setShowGuestModal] = useState<boolean>(() => {
+    const st = getWebGuestStatus();
+    return st.isGuestMode && st.isLocked;
+  });
+  const [mobileBannerDismissed, setMobileBannerDismissed] = useState(false);
+
+  const [showUpdaterModal, setShowUpdaterModal] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableAppUpdate | null>(null);
+  const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
 
   const [tacticalCam, setTacticalCam] = useState(false);
   const [speechText, setSpeechText] = useState<string | null>(null);
@@ -209,18 +238,119 @@ export default function App() {
     [clearAiTimer],
   );
 
-  // Unlock Web Audio context & resume BGM cleanly on user interaction
+  // Unlock Web Audio context & resume BGM cleanly on user interaction (pointer, touch, click, keyboard)
   useEffect(() => {
     const unlock = () => {
       soundManager.unlockAudio();
     };
     window.addEventListener('pointerdown', unlock, { capture: true, passive: true });
+    window.addEventListener('touchstart', unlock, { capture: true, passive: true });
+    window.addEventListener('touchend', unlock, { capture: true, passive: true });
+    window.addEventListener('click', unlock, { capture: true, passive: true });
     window.addEventListener('keydown', unlock, { capture: true, passive: true });
     return () => {
       window.removeEventListener('pointerdown', unlock, { capture: true });
+      window.removeEventListener('touchstart', unlock, { capture: true });
+      window.removeEventListener('touchend', unlock, { capture: true });
+      window.removeEventListener('click', unlock, { capture: true });
       window.removeEventListener('keydown', unlock, { capture: true });
     };
   }, []);
+
+  // Tauri desktop startup: hydrate atomic save.json backup + silent background update check
+  useEffect(() => {
+    if (!isTauri) return;
+    let active = true;
+    void hydrateProfileFromTauriDisk(profile).then((merged) => {
+      if (!active) return;
+      setProfile(merged);
+      setLanguage(merged.language);
+      setMuted(merged.muted);
+      soundManager.setMuted(merged.muted);
+      soundManager.setMenuMusicEnabled(merged.settings.menuMusicEnabled);
+      soundManager.setGameMusicEnabled(merged.settings.gameMusicEnabled);
+      soundManager.setMusicVolume(merged.settings.musicVolume);
+      soundManager.setSfxVolume(merged.settings.sfxVolume);
+      soundManager.setVoiceVolume(merged.settings.voiceVolume);
+      sceneRef.current?.setGraphicsSettings({
+        quality: merged.settings.graphicsQuality,
+        showFps: merged.settings.showFps,
+      });
+    });
+
+    void checkForDesktopUpdate(true).then((outcome) => {
+      if (!active) return;
+      if (outcome.status === 'available') {
+        setAvailableUpdate(outcome.update);
+        setShowUpdaterModal(true);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTauri]);
+
+  const handleCheckUpdates = useCallback(async () => {
+    if (!isTauri) return;
+    setShowUpdaterModal(true);
+    setCheckingUpdate(true);
+    setUpdateCheckError(null);
+    const outcome = await checkForDesktopUpdate(false);
+    setCheckingUpdate(false);
+    if (outcome.status === 'available') {
+      setAvailableUpdate(outcome.update);
+    } else if (outcome.status === 'error') {
+      setUpdateCheckError(outcome.message);
+    } else {
+      setAvailableUpdate(null);
+    }
+  }, [isTauri]);
+
+  const handleExportSave = useCallback(() => {
+    try {
+      const json = exportProfileToJson(profile);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `chuno-save-${profile.playerId.toLowerCase()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.warn('[ChUno Save] Failed to export profile JSON:', err);
+    }
+  }, [profile]);
+
+  const handleImportSaveJson = useCallback(
+    (rawJson: string): { ok: boolean; error?: string } => {
+      const res = parseAndValidateImportedProfile(rawJson, profile);
+      if (!res.ok) {
+        return { ok: false, error: res.error };
+      }
+      const next = res.profile;
+      saveProfile(next);
+      setProfile(next);
+      setLanguage(next.language);
+      setMuted(next.muted);
+      soundManager.setMuted(next.muted);
+      soundManager.setMenuMusicEnabled(next.settings.menuMusicEnabled);
+      soundManager.setGameMusicEnabled(next.settings.gameMusicEnabled);
+      soundManager.setMusicVolume(next.settings.musicVolume);
+      soundManager.setSfxVolume(next.settings.sfxVolume);
+      soundManager.setVoiceVolume(next.settings.voiceVolume);
+      sceneRef.current?.setGraphicsSettings({
+        quality: next.settings.graphicsQuality,
+        showFps: next.settings.showFps,
+      });
+      void leaderboardService.submitPlayerSnapshot(next);
+      return { ok: true };
+    },
+    [profile],
+  );
 
   const clearScheduled = useCallback(() => {
     aiGenRef.current++;
@@ -374,9 +504,16 @@ export default function App() {
         }
         return res.profile;
       });
+      if (!isTauri) {
+        const nextGuest = recordWebGuestMatchCompleted();
+        setGuestStatus(nextGuest);
+        if (nextGuest.promptKind !== 'none') {
+          setShowGuestModal(true);
+        }
+      }
       setScreen('gameover');
     },
-    [clearScheduled, speakEvent],
+    [clearScheduled, isTauri, speakEvent],
   );
 
   const processEvents = useCallback(
@@ -1070,6 +1207,14 @@ export default function App() {
 
   const startNewMatch = useCallback(
     (targetMode: GameMode = mode, targetDiff: DifficultyLevel = difficulty) => {
+      if (!isTauri) {
+        const currentGuest = getWebGuestStatus();
+        setGuestStatus(currentGuest);
+        if (currentGuest.isLocked) {
+          setShowGuestModal(true);
+          return;
+        }
+      }
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
@@ -1682,6 +1827,10 @@ export default function App() {
           personality={personalityOpt}
           language={language}
           muted={muted}
+          isTauri={isTauri}
+          guestStatus={guestStatus}
+          hasUpdateAvailable={Boolean(availableUpdate)}
+          onCheckUpdates={() => void handleCheckUpdates()}
           onChangeMode={handleChangeMode}
           onChangeDifficulty={handleChangeDifficulty}
           onChangePersonality={handleChangePersonality}
@@ -1717,6 +1866,13 @@ export default function App() {
           tacticalCam={tacticalCam}
           muted={muted}
           speechText={speechText}
+          guestBadgeText={
+            !isTauri && guestStatus.isGuestMode
+              ? language === 'ru'
+                ? `Гость · ${guestStatus.matchesPlayed}/${guestStatus.maxMatches}`
+                : `Guest · ${guestStatus.matchesPlayed}/${guestStatus.maxMatches}`
+              : null
+          }
           wildSelectedSq={wildSelectedSq}
           pendingPromoMove={pendingPromoMove}
           resurrectOptions={hud.resurrectOptions}
@@ -1782,6 +1938,10 @@ export default function App() {
           sfxVolume={profile.settings.sfxVolume}
           voiceVolume={profile.settings.voiceVolume}
           dialogueAudioMode={profile.settings.dialogueAudioMode}
+          isTauri={isTauri}
+          onExportSave={handleExportSave}
+          onImportSaveJson={handleImportSaveJson}
+          onCheckUpdates={() => void handleCheckUpdates()}
           onToggleMute={handleToggleMute}
           onToggleMenuMusic={handleToggleMenuMusic}
           onToggleGameMusic={handleToggleGameMusic}
@@ -1816,6 +1976,10 @@ export default function App() {
           sfxVolume={profile.settings.sfxVolume}
           voiceVolume={profile.settings.voiceVolume}
           dialogueAudioMode={profile.settings.dialogueAudioMode}
+          isTauri={isTauri}
+          onExportSave={handleExportSave}
+          onImportSaveJson={handleImportSaveJson}
+          onCheckUpdates={() => void handleCheckUpdates()}
           onChangeGraphicsQuality={handleChangeGraphicsQuality}
           onToggleShowFps={handleToggleShowFps}
           onChangeMusicVolume={handleChangeMusicVolume}
@@ -1828,6 +1992,65 @@ export default function App() {
 
       {/* Godot 4.3+ Source Modal */}
       {showGodot && <GodotModal language={language} onClose={() => setShowGodot(false)} />}
+
+      {/* Tauri Desktop Auto-Updater Modal (hidden in web browser) */}
+      {isTauri && showUpdaterModal && (
+        <UpdaterModal
+          mode={mode}
+          language={language}
+          profile={profile}
+          checking={checkingUpdate}
+          update={availableUpdate}
+          checkError={updateCheckError}
+          onRecheck={() => void handleCheckUpdates()}
+          onClose={() => setShowUpdaterModal(false)}
+        />
+      )}
+
+      {/* Browser-Only Guest 3-Match Gate Modal (never shown in Tauri desktop) */}
+      {!isTauri && showGuestModal && guestStatus.isGuestMode && (
+        <WebGuestModal
+          mode={mode}
+          language={language}
+          guestStatus={guestStatus}
+          onContinueGuest={
+            guestStatus.isLocked ? undefined : () => setShowGuestModal(false)
+          }
+          onExportSave={handleExportSave}
+        />
+      )}
+
+      {/* Dismissible Mobile Browser Orientation / Desktop Download Recommendation Banner */}
+      {!isTauri && !mobileBannerDismissed && (
+        <div
+          data-testid="mobile-web-hint-banner"
+          className="md:hidden fixed bottom-2.5 inset-x-3 z-20 pointer-events-auto flex items-center justify-between gap-2.5 rounded-lg border border-amber-500/35 bg-stone-950/92 px-3 py-2 text-[11px] text-stone-100 shadow-lg"
+        >
+          <span className="leading-snug">
+            {language === 'ru'
+              ? 'Для лучшего опыта поверните экран горизонтально или скачайте десктопную версию ChUno.'
+              : 'For the best experience, rotate your screen to landscape or download the desktop version of ChUno.'}
+          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <a
+              href={getChunoDownloadUrl(language)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2 py-1 rounded bg-amber-500 text-stone-950 font-bold whitespace-nowrap"
+            >
+              {language === 'ru' ? 'Скачать' : 'Download'}
+            </a>
+            <button
+              type="button"
+              aria-label={language === 'ru' ? 'Закрыть' : 'Dismiss'}
+              onClick={() => setMobileBannerDismissed(true)}
+              className="px-1.5 py-1 rounded text-stone-400 hover:text-white cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Achievement Unlock Toast Stack */}
       <AchievementToast

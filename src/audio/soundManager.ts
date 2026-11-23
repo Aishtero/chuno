@@ -3,6 +3,7 @@ import {
   MusicContext,
   MusicFolder,
   computeEffectiveMusicVolume,
+  isMobileWebEnvironment,
   musicManager,
 } from './musicManager';
 
@@ -112,7 +113,9 @@ class SoundManager {
 
   private getEffectiveSfxGain(): number {
     if (this.muted || this.sfxVolume <= 0) return 0;
-    return Math.max(0, Math.min(1, computeEffectiveSfxVolume(this.sfxVolume)));
+    const base = computeEffectiveSfxVolume(this.sfxVolume);
+    const boosted = isMobileWebEnvironment() ? Math.min(0.55, Math.max(0.05, base * 2.1)) : base;
+    return Math.max(0, Math.min(1, boosted));
   }
 
   private playCustomSfxSlot(slot: CustomSfxSlot): boolean {
@@ -179,8 +182,26 @@ class SoundManager {
   }
 
   public unlockAudio(): void {
+    const wasUnlocked = this.audioUnlocked;
     this.audioUnlocked = true;
-    this.ensureContext(false);
+    const ctx = this.ensureContext(false);
+    if (ctx) {
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      // Standard mobile WebKit/iOS hardware channel unlock via 1-sample silent buffer on first gesture
+      if (!wasUnlocked) {
+        try {
+          const silentBuf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = silentBuf;
+          src.connect(ctx.destination);
+          src.start(0);
+        } catch {
+          // Ignore
+        }
+      }
+    }
     musicManager.unlockAndResume();
     if (this.desiredMusicTrack) {
       if (this.currentBgm && this.currentBgm.paused && this.activeMusicTrack === this.desiredMusicTrack) {

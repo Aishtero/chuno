@@ -1,5 +1,5 @@
-import React from 'react';
-import { X } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { FileDown, FileUp, RefreshCw, X } from 'lucide-react';
 import { CardType, DialogueAudioMode, GraphicsQuality } from '../core/deck/cardData';
 import { Language, getTranslations } from '../core/localization';
 import { PlayerProfile } from '../core/profileManager';
@@ -13,6 +13,10 @@ interface RulesModalProps {
   sfxVolume: number;
   voiceVolume: number;
   dialogueAudioMode: DialogueAudioMode;
+  isTauri?: boolean;
+  onExportSave?: () => void;
+  onImportSaveJson?: (rawJson: string) => { ok: boolean; error?: string };
+  onCheckUpdates?: () => void;
   onChangeGraphicsQuality: (quality: GraphicsQuality) => void;
   onToggleShowFps: () => void;
   onChangeMusicVolume: (volume: number) => void;
@@ -48,6 +52,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({
   sfxVolume,
   voiceVolume,
   dialogueAudioMode,
+  isTauri,
+  onExportSave,
+  onImportSaveJson,
+  onCheckUpdates,
   onChangeGraphicsQuality,
   onToggleShowFps,
   onChangeMusicVolume,
@@ -57,10 +65,41 @@ export const RulesModal: React.FC<RulesModalProps> = ({
   onClose,
 }) => {
   const t = getTranslations(language);
+  const isRu = language === 'ru';
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [saveNotice, setSaveNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const s = profile.stats;
   const totalWins = s.lightWins + s.survivalEasyWins + s.survivalMedWins + s.survivalHardWins;
   const totalLosses =
     s.lightLosses + s.survivalEasyLosses + s.survivalMedLosses + s.survivalHardLosses;
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !onImportSaveJson) return;
+    try {
+      const text = await file.text();
+      const res = onImportSaveJson(text);
+      if (res.ok) {
+        setSaveNotice({
+          ok: true,
+          text: isRu ? 'Сохранение успешно импортировано!' : 'Save imported successfully!',
+        });
+      } else {
+        setSaveNotice({
+          ok: false,
+          text: isRu
+            ? `Ошибка импорта: ${res.error || 'неверный формат'}`
+            : `Import failed: ${res.error || 'invalid file'}`,
+        });
+      }
+    } catch {
+      setSaveNotice({
+        ok: false,
+        text: isRu ? 'Не удалось прочитать файл' : 'Failed to read file',
+      });
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
@@ -235,6 +274,77 @@ export const RulesModal: React.FC<RulesModalProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Save Backup (Export / Import JSON) & Tauri Auto-Updater */}
+                {(onExportSave || onImportSaveJson || (isTauri && onCheckUpdates)) && (
+                  <div className="pt-3 border-t border-stone-800 space-y-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {onExportSave && (
+                        <button
+                          type="button"
+                          data-testid="rules-export-save-btn"
+                          onClick={() => {
+                            onExportSave();
+                            setSaveNotice({
+                              ok: true,
+                              text: isRu
+                                ? 'Файл сохранения (.json) скачан'
+                                : 'Save file (.json) exported',
+                            });
+                          }}
+                          className="inline-flex items-center gap-1.5 py-2 px-3 rounded-md border border-stone-700 bg-stone-950 text-xs font-semibold text-stone-200 hover:bg-stone-800 cursor-pointer"
+                        >
+                          <FileDown className="w-3.5 h-3.5 text-amber-500" />
+                          <span>
+                            {isRu ? 'Экспорт сохранения (.json)' : 'Export Save (.json)'}
+                          </span>
+                        </button>
+                      )}
+                      {onImportSaveJson && (
+                        <>
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".json,application/json"
+                            className="hidden"
+                            onChange={(e) => void handleFileSelect(e)}
+                          />
+                          <button
+                            type="button"
+                            data-testid="rules-import-save-btn"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="inline-flex items-center gap-1.5 py-2 px-3 rounded-md border border-stone-700 bg-stone-950 text-xs font-semibold text-stone-200 hover:bg-stone-800 cursor-pointer"
+                          >
+                            <FileUp className="w-3.5 h-3.5 text-emerald-500" />
+                            <span>
+                              {isRu ? 'Импорт сохранения (.json)' : 'Import Save (.json)'}
+                            </span>
+                          </button>
+                        </>
+                      )}
+                      {isTauri && onCheckUpdates && (
+                        <button
+                          type="button"
+                          data-testid="rules-check-updates-btn"
+                          onClick={onCheckUpdates}
+                          className="inline-flex items-center gap-1.5 py-2 px-3 rounded-md border border-amber-500/40 bg-stone-950 text-xs font-semibold text-amber-300 hover:bg-stone-800 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+                          <span>{isRu ? 'Проверить обновления' : 'Check for Updates'}</span>
+                        </button>
+                      )}
+                    </div>
+                    {saveNotice && (
+                      <div
+                        className={`text-xs font-medium ${
+                          saveNotice.ok ? 'text-emerald-400' : 'text-red-400'
+                        }`}
+                      >
+                        {saveNotice.text}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

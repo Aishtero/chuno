@@ -102,6 +102,7 @@ interface GameHudProps {
   tacticalCam: boolean;
   muted: boolean;
   speechText: string | null;
+  guestBadgeText?: string | null;
   wildSelectedSq: number | null;
   pendingPromoMove: { from: number; to: number } | null;
   resurrectOptions: { pieceId: number; type: PieceType; legalSquares: number[] }[];
@@ -140,6 +141,7 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   tacticalCam,
   muted,
   speechText,
+  guestBadgeText,
   wildSelectedSq,
   pendingPromoMove,
   resurrectOptions,
@@ -183,15 +185,23 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   const formattedTime = formatMatchTime(elapsedSeconds);
 
   return (
-    <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 md:p-6">
+    <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-2.5 sm:p-4 md:p-6">
       {/* Top Row: Compact Turn & Card Readout | Opponent Speech | Utility Controls */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-2 sm:gap-3">
         {/* Top-Left: Match State Placard */}
-        <div className={`pointer-events-auto shrink-0 px-4 py-3 rounded-lg border min-w-[248px] ${cardBg}`}>
-          <div className="flex items-center justify-between gap-3">
+        <div className={`pointer-events-auto shrink-0 px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg border min-w-0 sm:min-w-[248px] max-w-[66vw] sm:max-w-none ${cardBg}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-amber-500 whitespace-nowrap">
               {isPlayerTurn ? t.yourTurn : t.opponentTurn}
             </span>
+            {guestBadgeText && (
+              <span
+                data-testid="hud-guest-badge"
+                className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-mono-num text-[10px] font-semibold whitespace-nowrap"
+              >
+                {guestBadgeText}
+              </span>
+            )}
             <span className={`inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap ${isSurv ? 'text-stone-400' : 'text-stone-600'}`}>
               <span>{playerColor === 'white' ? t.playingAsWhite : t.playingAsBlack}</span>
               <span aria-hidden="true">·</span>

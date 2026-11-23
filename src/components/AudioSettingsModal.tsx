@@ -1,5 +1,5 @@
-import React from 'react';
-import { Music, Volume2, VolumeX, X } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { FileDown, FileUp, Music, RefreshCw, Volume2, VolumeX, X } from 'lucide-react';
 import { DialogueAudioMode, GameMode } from '../core/deck/cardData';
 import { Language, getTranslations } from '../core/localization';
 
@@ -13,6 +13,10 @@ interface AudioSettingsModalProps {
   sfxVolume: number;
   voiceVolume: number;
   dialogueAudioMode: DialogueAudioMode;
+  isTauri?: boolean;
+  onExportSave?: () => void;
+  onImportSaveJson?: (rawJson: string) => { ok: boolean; error?: string };
+  onCheckUpdates?: () => void;
   onToggleMute: () => void;
   onToggleMenuMusic: () => void;
   onToggleGameMusic: () => void;
@@ -36,6 +40,10 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
     sfxVolume,
     voiceVolume,
     dialogueAudioMode,
+    isTauri,
+    onExportSave,
+    onImportSaveJson,
+    onCheckUpdates,
     onToggleMute,
     onToggleMenuMusic,
     onToggleGameMusic,
@@ -48,6 +56,36 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
     const t = getTranslations(language);
     const isSurv = mode === 'survival';
     const isRu = language === 'ru';
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [saveNotice, setSaveNotice] = useState<{ ok: boolean; text: string } | null>(null);
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file || !onImportSaveJson) return;
+      try {
+        const text = await file.text();
+        const res = onImportSaveJson(text);
+        if (res.ok) {
+          setSaveNotice({
+            ok: true,
+            text: isRu ? 'Сохранение успешно импортировано!' : 'Save imported successfully!',
+          });
+        } else {
+          setSaveNotice({
+            ok: false,
+            text: isRu
+              ? `Ошибка импорта: ${res.error || 'неверный формат'}`
+              : `Import failed: ${res.error || 'invalid file'}`,
+          });
+        }
+      } catch {
+        setSaveNotice({
+          ok: false,
+          text: isRu ? 'Не удалось прочитать файл' : 'Failed to read file',
+        });
+      }
+    };
 
     const panelClass = isSurv
       ? 'bg-stone-950 border-stone-800 text-stone-100'
@@ -244,6 +282,90 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
                 })}
               </div>
             </div>
+
+            {/* Save Backup (Export / Import JSON) & Tauri Auto-Updater */}
+            {(onExportSave || onImportSaveJson || (isTauri && onCheckUpdates)) && (
+              <div className={`p-3.5 rounded-xl border space-y-2.5 ${boxClass}`}>
+                <div className={`text-xs font-medium ${mutedLabelClass}`}>
+                  {isRu ? 'Сохранение профиля и обновления' : 'Save Backup & Updates'}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {onExportSave && (
+                    <button
+                      type="button"
+                      data-testid="export-save-btn"
+                      onClick={() => {
+                        onExportSave();
+                        setSaveNotice({
+                          ok: true,
+                          text: isRu ? 'Файл сохранения (.json) скачан' : 'Save file (.json) exported',
+                        });
+                      }}
+                      className={`inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                        isSurv
+                          ? 'bg-stone-950 border-stone-700 text-stone-200 hover:bg-stone-800'
+                          : 'bg-white border-stone-300 text-stone-800 hover:bg-stone-100'
+                      }`}
+                    >
+                      <FileDown className="w-3.5 h-3.5 text-amber-500" />
+                      <span>
+                        {isRu ? 'Экспорт сохранения (.json)' : 'Export Save (.json)'}
+                      </span>
+                    </button>
+                  )}
+                  {onImportSaveJson && (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json,application/json"
+                        className="hidden"
+                        onChange={(e) => void handleFileSelect(e)}
+                      />
+                      <button
+                        type="button"
+                        data-testid="import-save-btn"
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                          isSurv
+                            ? 'bg-stone-950 border-stone-700 text-stone-200 hover:bg-stone-800'
+                            : 'bg-white border-stone-300 text-stone-800 hover:bg-stone-100'
+                        }`}
+                      >
+                        <FileUp className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>
+                          {isRu ? 'Импорт сохранения (.json)' : 'Import Save (.json)'}
+                        </span>
+                      </button>
+                    </>
+                  )}
+                </div>
+                {isTauri && onCheckUpdates && (
+                  <button
+                    type="button"
+                    data-testid="settings-check-updates-btn"
+                    onClick={onCheckUpdates}
+                    className={`w-full inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                      isSurv
+                        ? 'bg-stone-950 border-amber-500/40 text-amber-300 hover:bg-stone-800'
+                        : 'bg-white border-stone-300 text-stone-800 hover:bg-stone-100'
+                    }`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+                    <span>{isRu ? 'Проверить обновления' : 'Check for Updates'}</span>
+                  </button>
+                )}
+                {saveNotice && (
+                  <div
+                    className={`text-[11px] font-medium ${
+                      saveNotice.ok ? 'text-emerald-400' : 'text-red-400'
+                    }`}
+                  >
+                    {saveNotice.text}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div

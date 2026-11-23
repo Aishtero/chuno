@@ -14,14 +14,34 @@ export const CHANNEL_VOLUME_SCALE: Record<MusicFolder, number> = {
   unknown: 0.45,
 };
 
+export function isMobileWebEnvironment(): boolean {
+  if (typeof window === 'undefined') return false;
+  if ('__TAURI_INTERNALS__' in window || '__TAURI__' in window) return false;
+  try {
+    if (typeof window.matchMedia === 'function') {
+      return window.matchMedia('(max-width: 768px), (pointer: coarse)').matches;
+    }
+    return window.innerWidth < 768;
+  } catch {
+    return false;
+  }
+}
+
 export function computeEffectiveMusicVolume(
   sliderVolume: number,
   channel: MusicFolder | null = null,
+  mobileSpeakerBoost = false,
 ): number {
   const clamped = Math.max(0, Math.min(1, sliderVolume));
   if (clamped <= 0) return 0;
   const channelScale = channel ? (CHANNEL_VOLUME_SCALE[channel] ?? 1.0) : 1.0;
-  return Math.pow(clamped, MUSIC_VOLUME_CURVE) * MUSIC_GAIN_SCALE * channelScale;
+  const base = Math.pow(clamped, MUSIC_VOLUME_CURVE) * MUSIC_GAIN_SCALE;
+  if (mobileSpeakerBoost) {
+    // Phone speakers in mobile browsers make 0.0113 (-39 dB) nearly inaudible; lift floor gently
+    const boosted = Math.max(clamped >= 0.05 ? 0.034 : 0, base * 2.5);
+    return Math.min(0.45, boosted * channelScale);
+  }
+  return base * channelScale;
 }
 
 function extractGlobUrls(globMap: Record<string, unknown> | undefined): string[] {
@@ -129,6 +149,7 @@ class MusicManager {
   private needsResume = false;
   private pendingCategory: MusicFolder | null = null;
   private opusSupport = '';
+  private decodeErrorOccurred = false;
 
   private desiredFolder: MusicFolder | null = null;
   private desiredContext: MusicContext = 'menu';
@@ -155,13 +176,16 @@ class MusicManager {
         console.warn('[MusicManager] Browser reports no audio/ogg; codecs=opus support.');
       }
 
-      // Global gesture listeners in capture phase so ANY click or keypress unlocks & resumes playback
+      // Global gesture listeners in capture phase across pointer, touch, click & key events
       const onUserGesture = () => {
         if (this.shouldAttemptResumeOnGesture()) {
           this.unlockAndResume();
         }
       };
       window.addEventListener('pointerdown', onUserGesture, { capture: true, passive: true });
+      window.addEventListener('touchstart', onUserGesture, { capture: true, passive: true });
+      window.addEventListener('touchend', onUserGesture, { capture: true, passive: true });
+      window.addEventListener('click', onUserGesture, { capture: true, passive: true });
       window.addEventListener('keydown', onUserGesture, { capture: true, passive: true });
 
       // Expose read-only diagnostic hook for runtime inspection
@@ -221,8 +245,9 @@ class MusicManager {
     return this.currentEl !== null && !this.currentEl.paused && this.getEffectiveVolume() > 0.0005;
   }
 
-  /** True whenever the active/desired music channel has real audio files (so procedural ambient stays muted). */
+  /** True whenever the active/desired music channel has playable audio files (so procedural ambient stays muted). */
   public hasRealTracksForActiveChannel(): boolean {
+    if (this.decodeErrorOccurred) return false;
     const folder = this.activeFolder ?? this.desiredFolder;
     if (!folder) return false;
     return (FOLDER_PLAYLISTS[folder]?.length ?? 0) > 0;
@@ -239,9 +264,13 @@ class MusicManager {
   public getEffectiveVolume(channelOverride?: MusicFolder | null): number {
     if (this.muted || !this.isCurrentContextEnabled()) return 0;
     const channel = channelOverride ?? this.activeFolder ?? this.pendingCategory ?? this.desiredFolder;
+    const mobileBoost = isMobileWebEnvironment();
     return Math.max(
       0,
-      Math.min(1, computeEffectiveMusicVolume(this.musicVolume, channel) * (this.ducked ? 0.35 : 1)),
+      Math.min(
+        1,
+        computeEffectiveMusicVolume(this.musicVolume, channel, mobileBoost) * (this.ducked ? 0.35 : 1),
+      ),
     );
   }
 
@@ -337,6 +366,15 @@ class MusicManager {
   }
 
   private attemptResumeElement(el: HTMLAudioElement, folder: MusicFolder): void {
+    if (el.error) {
+      // Element encountered an earlier load/decode error; recreate cleanly inside user gesture
+      this.crossfadeToFolder(folder, this.activeTrackIndex);
+      return;
+    }
+    const targetVol = this.getEffectiveVolume(folder);
+    if (el.volume <= 0.001 && targetVol > 0) {
+      el.volume = Math.min(targetVol, 0.01);
+    }
     const playPromise = el.play();
     if (playPromise && typeof playPromise.then === 'function') {
       playPromise
@@ -344,9 +382,10 @@ class MusicManager {
           if (this.currentEl !== el) return;
           this.unlocked = true;
           this.needsResume = false;
+          this.decodeErrorOccurred = false;
           this.pendingCategory = null;
           this.activeFolder = folder;
-          this.fadeCurrentToVolume(this.getEffectiveVolume(), 600, false);
+          this.fadeCurrentToVolume(this.getEffectiveVolume(folder), 480, false);
         })
         .catch((err: unknown) => {
           if (this.currentEl !== el) return;
@@ -354,6 +393,11 @@ class MusicManager {
           if (name === 'NotAllowedError') {
             this.needsResume = true;
             this.pendingCategory = folder;
+            this.activeFolder = null;
+          } else if (name === 'NotSupportedError') {
+            this.decodeErrorOccurred = true;
+            this.needsResume = false;
+            this.pendingCategory = null;
             this.activeFolder = null;
           } else if (name !== 'AbortError') {
             console.warn('[MusicManager] Failed to resume audio:', el.src, err);
@@ -364,7 +408,7 @@ class MusicManager {
       this.needsResume = false;
       this.pendingCategory = null;
       this.activeFolder = folder;
-      this.fadeCurrentToVolume(this.getEffectiveVolume(), 600, false);
+      this.fadeCurrentToVolume(this.getEffectiveVolume(folder), 480, false);
     }
   }
 
@@ -511,6 +555,7 @@ class MusicManager {
         incoming.volume = 0;
         incoming.loop = tracks.length === 1;
         incoming.addEventListener('error', () => {
+          this.decodeErrorOccurred = true;
           console.warn(
             '[MusicManager] Audio load/decode error:',
             url,
@@ -564,6 +609,11 @@ class MusicManager {
               this.pendingCategory = folder;
               this.activeFolder = null;
               el.volume = 0;
+            } else if (name === 'NotSupportedError') {
+              this.decodeErrorOccurred = true;
+              this.needsResume = false;
+              this.pendingCategory = null;
+              this.activeFolder = null;
             } else if (name !== 'AbortError') {
               console.warn('[MusicManager] Playback error:', el.src, err);
             }

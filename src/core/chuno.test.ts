@@ -898,5 +898,160 @@ test('formatMatchTime formats MM:SS and HH:MM:SS cleanly', async () => {
   assert.equal(formatMatchTime(3661), '01:01:01');
 });
 
+test('webGuestGate enforces 0 -> 1 -> 2 -> 3 match progression in browser, resets on version bump, and is disabled in Tauri', async () => {
+  const {
+    getWebGuestStatus,
+    recordWebGuestMatchCompleted,
+    MAX_WEB_GUEST_MATCHES,
+  } = await import('./webGuestGate');
+
+  const store = new Map<string, string>();
+  const mockStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      store.set(k, v);
+    },
+  };
+
+  // 0. Initial browser state (0/3)
+  const s0 = getWebGuestStatus({ appVersion: '0.2.2', storage: mockStorage, isTauri: false });
+  assert.equal(s0.isGuestMode, true);
+  assert.equal(s0.matchesPlayed, 0);
+  assert.equal(s0.maxMatches, MAX_WEB_GUEST_MATCHES);
+  assert.equal(s0.remainingMatches, 3);
+  assert.equal(s0.isLocked, false);
+  assert.equal(s0.promptKind, 'none');
+
+  // 1. After 1st completed match (1/3 -> soft upsell prompt with 2 matches left)
+  const s1 = recordWebGuestMatchCompleted({
+    appVersion: '0.2.2',
+    storage: mockStorage,
+    isTauri: false,
+  });
+  assert.equal(s1.matchesPlayed, 1);
+  assert.equal(s1.remainingMatches, 2);
+  assert.equal(s1.isLocked, false);
+  assert.equal(s1.promptKind, 'after_first');
+
+  // 2. After 2nd completed match (2/3 -> final match reminder with 1 match left)
+  const s2 = recordWebGuestMatchCompleted({
+    appVersion: '0.2.2',
+    storage: mockStorage,
+    isTauri: false,
+  });
+  assert.equal(s2.matchesPlayed, 2);
+  assert.equal(s2.remainingMatches, 1);
+  assert.equal(s2.isLocked, false);
+  assert.equal(s2.promptKind, 'after_second');
+
+  // 3. After 3rd completed match (3/3 -> hard lock, 0 remaining)
+  const s3 = recordWebGuestMatchCompleted({
+    appVersion: '0.2.2',
+    storage: mockStorage,
+    isTauri: false,
+  });
+  assert.equal(s3.matchesPlayed, 3);
+  assert.equal(s3.remainingMatches, 0);
+  assert.equal(s3.isLocked, true);
+  assert.equal(s3.promptKind, 'locked');
+
+  // Reloading page in same version remains locked
+  const s3Reload = getWebGuestStatus({
+    appVersion: '0.2.2',
+    storage: mockStorage,
+    isTauri: false,
+  });
+  assert.equal(s3Reload.isLocked, true);
+  assert.equal(s3Reload.matchesPlayed, 3);
+
+  // 4. Version bump (0.2.2 -> 0.2.3) automatically resets guest allowance to 0/3
+  const nextVer = getWebGuestStatus({
+    appVersion: '0.2.3',
+    storage: mockStorage,
+    isTauri: false,
+  });
+  assert.equal(nextVer.matchesPlayed, 0);
+  assert.equal(nextVer.remainingMatches, 3);
+  assert.equal(nextVer.isLocked, false);
+  assert.equal(nextVer.promptKind, 'none');
+
+  // 5. Desktop Tauri runtime completely disables guest gate even if storage had 3/3
+  const tauriState = getWebGuestStatus({
+    appVersion: '0.2.2',
+    storage: mockStorage,
+    isTauri: true,
+  });
+  assert.equal(tauriState.isGuestMode, false);
+  assert.equal(tauriState.isLocked, false);
+  assert.equal(tauriState.promptKind, 'none');
+  assert.equal(tauriState.remainingMatches, Number.POSITIVE_INFINITY);
+
+  const tauriAfterMatch = recordWebGuestMatchCompleted({
+    appVersion: '0.2.2',
+    storage: mockStorage,
+    isTauri: true,
+  });
+  assert.equal(tauriAfterMatch.isGuestMode, false);
+  assert.equal(tauriAfterMatch.isLocked, false);
+});
+
+test('mergeProfiles, exportProfileToJson, and parseAndValidateImportedProfile preserve achievements, stats, and forward-compatible fields', async () => {
+  const {
+    createDefaultProfile,
+    mergeProfiles,
+    exportProfileToJson,
+    parseAndValidateImportedProfile,
+  } = await import('./profileManager');
+
+  const local = createDefaultProfile();
+  local.displayName = 'Player';
+  local.score = 600;
+  local.stats.totalMatches = 2;
+  local.stats.lightWins = 2;
+  local.unlockedAchievements = { first_seat: '2026-11-23T10:00:00Z' };
+
+  const diskBackup = createDefaultProfile();
+  diskBackup.playerId = 'CHUNO-DISK-SAVE';
+  diskBackup.displayName = 'GrandMaster';
+  diskBackup.score = 2400;
+  diskBackup.stats.totalMatches = 8;
+  diskBackup.stats.survivalHardWins = 3;
+  diskBackup.stats.bestStreak = 5;
+  diskBackup.stats.fastestWinSec = 74;
+  diskBackup.unlockedAchievements = {
+    first_seat: '2026-11-20T09:00:00Z',
+    survive_hard: '2026-11-21T12:00:00Z',
+  };
+  diskBackup.friends = [{ id: 'F-1', displayName: 'CompanionA', addedAt: '2026-11-22T00:00:00Z' }];
+  diskBackup.futureExpansionField = { guild: 'Buro' };
+
+  const merged = mergeProfiles(local, diskBackup);
+  assert.equal(merged.playerId, 'CHUNO-DISK-SAVE');
+  assert.equal(merged.displayName, 'GrandMaster');
+  assert.equal(merged.score, 2400);
+  assert.equal(merged.stats.lightWins, 2);
+  assert.equal(merged.stats.survivalHardWins, 3);
+  assert.equal(merged.stats.bestStreak, 5);
+  assert.equal(merged.stats.fastestWinSec, 74);
+  assert.equal(merged.unlockedAchievements.first_seat, '2026-11-20T09:00:00Z');
+  assert.ok(merged.unlockedAchievements.survive_hard);
+  assert.equal(merged.friends?.length, 1);
+  assert.deepEqual(merged.futureExpansionField, { guild: 'Buro' });
+
+  const json = exportProfileToJson(merged);
+  const imported = parseAndValidateImportedProfile(json, createDefaultProfile());
+  assert.equal(imported.ok, true);
+  if (imported.ok) {
+    assert.equal(imported.profile.displayName, 'GrandMaster');
+    assert.equal(imported.profile.score, 2400);
+    assert.ok(imported.profile.unlockedAchievements.survive_hard);
+    assert.equal(imported.profile.friends?.length, 1);
+  }
+
+  assert.equal(parseAndValidateImportedProfile('').ok, false);
+  assert.equal(parseAndValidateImportedProfile('{corrupt').ok, false);
+  assert.equal(parseAndValidateImportedProfile('{"unrelated": 123}').ok, false);
+});
+
 
 
