@@ -3,6 +3,7 @@ node_modules/
 dist/
 .vite/
 .turbo/
+src-tauri/target/
 
 # Environment & secrets
 .env

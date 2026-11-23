@@ -133,7 +133,7 @@ export class AssetFactory {
 
     let discoveredCount = 0;
     try {
-      const res = await fetch('/models/manifest.json');
+      const res = await fetch('./models/manifest.json');
       if (!res.ok) return false;
       const data = (await res.json()) as { files?: string[] };
       const files = Array.isArray(data.files) ? data.files : [];

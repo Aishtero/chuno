@@ -73,7 +73,7 @@ class SoundManager {
       this.manifestLoaded = true;
       return Promise.resolve();
     }
-    this.manifestPromise = fetch('/audio/manifest.json')
+    this.manifestPromise = fetch('./audio/manifest.json')
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { files?: string[] } | null) => {
         if (data && Array.isArray(data.files)) {
