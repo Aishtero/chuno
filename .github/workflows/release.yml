@@ -1,4 +1,4 @@
-name: Release ChUno Desktop & Web
+name: Release ChUno Desktop
 
 on:
   push:
@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
   verify:
@@ -34,11 +32,6 @@ jobs:
 
       - name: Build web frontend
         run: npm run build
-
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
 
   build-desktop:
     needs: verify
@@ -145,15 +138,3 @@ jobs:
           generate_release_notes: true
           files: |
             release-assets/*
-
-  deploy-pages:
-    needs: verify
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
