@@ -1,7 +1,8 @@
 import React, { useRef, useState } from 'react';
-import { FileDown, FileUp, Music, RefreshCw, Volume2, VolumeX, X } from 'lucide-react';
+import { ExternalLink, FileDown, FileUp, Music, RefreshCw, ShieldCheck, Volume2, VolumeX, X } from 'lucide-react';
 import { DialogueAudioMode, GameMode } from '../core/deck/cardData';
 import { Language, getTranslations } from '../core/localization';
+import { getPrivacyPolicyUrl } from '../core/profileManager';
 
 interface AudioSettingsModalProps {
   mode: GameMode;
@@ -366,6 +367,31 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
                 )}
               </div>
             )}
+
+            {/* Honest Privacy Disclosure + Link to Site Privacy Policy */}
+            <div
+              data-testid="audio-privacy-block"
+              className={`p-3.5 rounded-xl border space-y-1.5 ${boxClass}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${labelClass}`}>
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>{t.privacyTitle}</span>
+                </span>
+                <a
+                  href={getPrivacyPolicyUrl(language)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="audio-privacy-link"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-amber-500 hover:text-amber-400 underline underline-offset-2"
+                >
+                  <span>{t.privacyLinkLabel}</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+              <p className={`text-[11px] leading-relaxed ${mutedLabelClass}`}>{t.privacyLine1}</p>
+              <p className={`text-[11px] leading-relaxed ${mutedLabelClass}`}>{t.privacyLine2}</p>
+            </div>
           </div>
 
           <div

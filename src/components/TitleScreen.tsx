@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Code2, RefreshCw, Sparkles, Trophy, Volume2, VolumeX } from 'lucide-react';
+import { BookOpen, Code2, HelpCircle, RefreshCw, Sparkles, Trophy, Volume2, VolumeX } from 'lucide-react';
 import { soundManager } from '../audio/soundManager';
 import { DifficultyLevel, GameMode, LightPersonality } from '../core/deck/cardData';
 import { Language, getTranslations } from '../core/localization';
@@ -22,6 +22,7 @@ interface TitleScreenProps {
   onChangeLanguage: (lang: Language) => void;
   onOpenAudioSettings: () => void;
   onStart: () => void;
+  onOpenGuide: () => void;
   onOpenRules: () => void;
   onOpenLeaderboard: () => void;
   onOpenGodot: () => void;
@@ -43,6 +44,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
   onChangeLanguage,
   onOpenAudioSettings,
   onStart,
+  onOpenGuide,
   onOpenRules,
   onOpenLeaderboard,
   onOpenGodot,
@@ -133,6 +135,20 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
           >
             <Trophy className="w-3.5 h-3.5 opacity-85" />
             <span>{language === 'ru' ? 'Лидеры и ачивки' : 'Leader Dashboard'}</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="title-how-to-play"
+            onClick={() => clickThen(onOpenGuide)}
+            className={`inline-flex items-center gap-1.5 py-1.5 text-xs font-medium tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              isSurv
+                ? 'text-amber-300/90 hover:text-amber-200'
+                : 'text-[#2b4235] hover:text-[#141c17]'
+            }`}
+          >
+            <HelpCircle className="w-3.5 h-3.5 opacity-85" />
+            <span>{t.howToPlayBtn}</span>
           </button>
 
           <button

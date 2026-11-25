@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BookOpen, Clock, Eye, Flag, Handshake, Lock, Pause, Volume2, VolumeX } from 'lucide-react';
+import { BookOpen, Clock, Eye, Flag, Handshake, HelpCircle, Lock, Pause, Volume2, VolumeX, X } from 'lucide-react';
 import { PieceColor, PieceType, PromotablePieceType } from '../core/chess/types';
 import { CardType, GameMode } from '../core/deck/cardData';
 import { Language, formatMatchTime, getTranslations } from '../core/localization';
@@ -103,13 +103,16 @@ interface GameHudProps {
   muted: boolean;
   speechText: string | null;
   guestBadgeText?: string | null;
+  firstMatchHint?: string | null;
   wildSelectedSq: number | null;
   pendingPromoMove: { from: number; to: number } | null;
   resurrectOptions: { pieceId: number; type: PieceType; legalSquares: number[] }[];
   selectedResurrectId: number | null;
   onToggleCamera: () => void;
   onOpenAudioSettings: () => void;
+  onOpenGuide: () => void;
   onOpenRules: () => void;
+  onDismissFirstMatchHint?: () => void;
   onPause: () => void;
   onOfferDraw: () => void;
   onResign: () => void;
@@ -142,13 +145,16 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   muted,
   speechText,
   guestBadgeText,
+  firstMatchHint,
   wildSelectedSq,
   pendingPromoMove,
   resurrectOptions,
   selectedResurrectId,
   onToggleCamera,
   onOpenAudioSettings,
+  onOpenGuide,
   onOpenRules,
+  onDismissFirstMatchHint,
   onPause,
   onOfferDraw,
   onResign,
@@ -187,9 +193,9 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   return (
     <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-2.5 sm:p-4 md:p-6">
       {/* Top Row: Compact Turn & Card Readout | Opponent Speech | Utility Controls */}
-      <div className="flex items-start justify-between gap-2 sm:gap-3">
+      <div className="flex flex-wrap sm:flex-nowrap items-start justify-between gap-2 sm:gap-3">
         {/* Top-Left: Match State Placard */}
-        <div className={`pointer-events-auto shrink-0 px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg border min-w-0 sm:min-w-[248px] max-w-[66vw] sm:max-w-none ${cardBg}`}>
+        <div className={`pointer-events-auto shrink-0 px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg border min-w-0 sm:min-w-[248px] max-w-full sm:max-w-none ${cardBg}`}>
           <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-amber-500 whitespace-nowrap">
               {isPlayerTurn ? t.yourTurn : t.opponentTurn}
@@ -318,7 +324,7 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
         </div>
 
         {/* Top-Right: Compact Utility Actions + Offer Draw / Resign */}
-        <div className="pointer-events-auto shrink-0 flex items-center gap-2 flex-wrap justify-end">
+        <div className="pointer-events-auto min-w-0 flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
           <button
             type="button"
             tabIndex={-1}
@@ -424,6 +430,21 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
           <button
             type="button"
             tabIndex={-1}
+            data-testid="hud-how-to-play"
+            aria-label={t.howToPlayBtn}
+            title={t.howToPlayBtn}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onOpenGuide();
+            }}
+            className={`p-2 rounded-md border transition-colors cursor-pointer ${btnMuted}`}
+          >
+            <HelpCircle className="w-4 h-4 text-amber-500" />
+          </button>
+
+          <button
+            type="button"
+            tabIndex={-1}
             aria-label={t.rulesTitle}
             onClick={(e) => {
               e.currentTarget.blur();
@@ -449,9 +470,37 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
         </div>
       </div>
 
-      {/* Bottom-Center: Contextual Turn Interaction Dock (No Draw Card modal box over board) */}
-      <div className="flex justify-center">
-        {isPlayerTurn && phase === 'PLAYER_MOVE_LOOP' && !pendingPromoMove && (
+      {/* Bottom-Center: Contextual Turn Interaction Dock + First-Match Floating Hint */}
+      <div className="flex flex-col items-center gap-2 pb-12 md:pb-0">
+        {firstMatchHint && !pendingPromoMove && (
+          <div
+            data-testid="first-match-hint-pill"
+            className={`pointer-events-auto inline-flex items-center gap-2.5 max-w-[92vw] px-3.5 py-2 rounded-full border shadow-lg text-xs font-semibold ${
+              isSurv
+                ? 'bg-stone-950/94 border-amber-500/55 text-amber-200'
+                : 'bg-stone-950/92 border-amber-500/60 text-amber-100'
+            }`}
+          >
+            <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500" />
+            </span>
+            <span className="leading-snug">{firstMatchHint}</span>
+            {onDismissFirstMatchHint && (
+              <button
+                type="button"
+                data-testid="dismiss-first-match-hint"
+                aria-label={t.close}
+                onClick={onDismissFirstMatchHint}
+                className="p-0.5 rounded-full text-stone-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+
+        {isPlayerTurn && phase === 'PLAYER_MOVE_LOOP' && !pendingPromoMove && !firstMatchHint && (
           <div className={`px-4 py-2 rounded-md border text-xs font-medium ${cardBg}`}>
             {t.clickPieceHint}
           </div>

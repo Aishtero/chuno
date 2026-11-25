@@ -104,6 +104,29 @@ export interface Translations {
   cardNames: Record<CardType, string>;
   cardDescs: Record<CardType, string>;
   pieceNames: Record<'pawn' | 'rook' | 'knight' | 'bishop' | 'queen' | 'king', string>;
+  howToPlayBtn: string;
+  guideTabVisual: string;
+  guideTabRules: string;
+  guideSkip: string;
+  guideBack: string;
+  guideNext: string;
+  guideDone: string;
+  guidePauseAuto: string;
+  guideResumeAuto: string;
+  guideSlides: {
+    title: string;
+    line1: string;
+    line2: string;
+  }[];
+  hintDrawCard: string;
+  hintMovePiece: string;
+  hintResurrect: string;
+  hintWild: string;
+  hintCoinFlip: string;
+  privacyTitle: string;
+  privacyLine1: string;
+  privacyLine2: string;
+  privacyLinkLabel: string;
 }
 
 const EN: Translations = {
@@ -239,6 +262,51 @@ const EN: Translations = {
     queen: 'Queen',
     king: 'King',
   },
+  howToPlayBtn: 'How to Play',
+  guideTabVisual: 'Visual Guide',
+  guideTabRules: 'Detailed Rules',
+  guideSkip: 'Skip',
+  guideBack: 'Back',
+  guideNext: 'Next',
+  guideDone: "Got it, let's play!",
+  guidePauseAuto: 'Pause auto-play',
+  guideResumeAuto: 'Resume auto-play',
+  guideSlides: [
+    {
+      title: '1. Draw a Card Every Turn',
+      line1: 'Click the 40-card deck on the right side of the table (or press [Space]).',
+      line2: 'The drawn card flips face-up immediately and decides your action for the turn.',
+    },
+    {
+      title: '2. Move Your Chess Pieces',
+      line1: 'Number cards (1–5 Moves) grant 1 to 5 consecutive legal chess moves.',
+      line2: 'Click your piece, then click a highlighted square. Delivering Check stops a streak.',
+    },
+    {
+      title: '3. Reverse — 180° Board Swap',
+      line1: 'Drawing Reverse rotates the entire chessboard 180° and swaps White ⇄ Black.',
+      line2: 'You immediately inherit your opponent’s army and turn passes to the rival.',
+    },
+    {
+      title: '4. Tactical Special Cards',
+      line1: 'Skip forfeits the turn; +2 / +4 Revive restores captured pieces onto your half.',
+      line2: 'Wild temporarily morphs any non-King piece into another type for 1 move.',
+    },
+    {
+      title: '5. Survival Mode — Coin & Revolver',
+      line1: 'Drawing a Bullet card triggers a 50/50 brass coin flip (Heads ♛ / Tails ☠).',
+      line2: 'Guess right to survive; guess wrong and face The Dealer’s revolver (-1 HP).',
+    },
+  ],
+  hintDrawCard: 'Click the deck on the table (or press [Space]) to draw a card.',
+  hintMovePiece: 'Select one of your pieces and click a highlighted square.',
+  hintResurrect: 'Pick a captured piece below, then place it on your half of the board.',
+  hintWild: 'Pick one of your pieces (not King) to temporarily morph it for 1 move.',
+  hintCoinFlip: 'Bullet card! Pick Heads or Tails — a wrong guess faces the revolver.',
+  privacyTitle: 'Privacy',
+  privacyLine1: 'Saves, achievements, and settings are stored locally on your device only.',
+  privacyLine2: 'No ads or telemetry; desktop connects only to check signed updates (latest.json).',
+  privacyLinkLabel: 'Privacy Policy',
 };
 
 const RU: Translations = {
@@ -374,6 +442,51 @@ const RU: Translations = {
     queen: 'Ферзь',
     king: 'Король',
   },
+  howToPlayBtn: 'Как играть',
+  guideTabVisual: 'Визуальный гайд',
+  guideTabRules: 'Подробные правила',
+  guideSkip: 'Пропустить',
+  guideBack: 'Назад',
+  guideNext: 'Далее',
+  guideDone: 'Понятно, играем!',
+  guidePauseAuto: 'Пауза автопоказа',
+  guideResumeAuto: 'Продолжить автопоказ',
+  guideSlides: [
+    {
+      title: '1. Вытяни карту в начале хода',
+      line1: 'Нажми на колоду из 40 карт справа на столе (или клавишу [Space]).',
+      line2: 'Карта сразу переворачивается на столе и задаёт твоё действие на ход.',
+    },
+    {
+      title: '2. Сделай ход фигурами',
+      line1: 'Числовые карты (1–5 ходов) дают серию от 1 до 5 легальных шахматных ходов.',
+      line2: 'Выбери свою фигуру и кликни по подсвеченной клетке. Шах прерывает серию.',
+    },
+    {
+      title: '3. Реверс — разворот доски на 180°',
+      line1: 'Карта Реверс разворачивает всю доску на 180° и меняет цвета (Белые ⇄ Чёрные).',
+      line2: 'Ты перехватываешь армию соперника, а право хода переходит оппоненту.',
+    },
+    {
+      title: '4. Тактические спецкарты',
+      line1: 'Пропуск сжигает ход; +2 / +4 Возврат возвращает срубленные фигуры на твою половину.',
+      line2: 'Джокер на 1 ход превращает любую фигуру (кроме Короля) в выбранный тип.',
+    },
+    {
+      title: '5. Survival Mode — Монета и Револьвер',
+      line1: 'Карта Пули запускает бросок латунной монеты 50/50 (Орёл ♛ / Решка ☠).',
+      line2: 'Угадал — выжил; ошибся — выстрел из револьвера Дилера (-1 HP).',
+    },
+  ],
+  hintDrawCard: 'Нажми на колоду на столе (или [Space]), чтобы вытянуть карту.',
+  hintMovePiece: 'Выбери свою фигуру и кликни по подсвеченной клетке.',
+  hintResurrect: 'Выбери срубленную фигуру ниже и поставь её на свою половину доски.',
+  hintWild: 'Выбери свою фигуру (кроме Короля), чтобы временно превратить её на 1 ход.',
+  hintCoinFlip: 'Карта Пули! Выбери Орёл или Решку — ошибка стоит выстрела.',
+  privacyTitle: 'Конфиденциальность',
+  privacyLine1: 'Сохранения, ачивки и настройки хранятся только локально на устройстве.',
+  privacyLine2: 'Без рекламы и телеметрии; в десктопе сеть нужна только для проверки обновлений (latest.json).',
+  privacyLinkLabel: 'Политика конфиденциальности',
 };
 
 export function getTranslations(lang: Language): Translations {

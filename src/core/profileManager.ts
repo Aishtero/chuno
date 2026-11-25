@@ -15,9 +15,14 @@ import {
 import { Language } from './localization';
 import { MatchEndReason } from './match/matchEngine';
 
-export const APP_VERSION = '0.2.2';
+export const APP_VERSION = '0.2.3';
 export const CURRENT_PROFILE_SCHEMA_VERSION = 2;
 export const CURRENT_AUDIO_DEFAULTS_VERSION = 4;
+
+export function getPrivacyPolicyUrl(lang: Language | 'uz' = 'en'): string {
+  const safeLang = lang === 'ru' ? 'ru' : lang === 'uz' ? 'uz' : 'en';
+  return `https://buro-ecosystem-web.pages.dev/${safeLang}/legal/privacy`;
+}
 
 export interface PlayerSettings {
   graphicsQuality: GraphicsQuality;
@@ -78,6 +83,8 @@ export interface PlayerProfile {
   score: number;
   language: Language;
   muted: boolean;
+  hasSeenTutorial: boolean;
+  hasSeenFirstMatchHints: boolean;
   settings: PlayerSettings;
   unlockedAchievements: Record<string, string>;
   stats: PlayerStats;
@@ -124,6 +131,8 @@ export function createDefaultProfile(): PlayerProfile {
     score: 0,
     language: 'en',
     muted: false,
+    hasSeenTutorial: false,
+    hasSeenFirstMatchHints: false,
     settings: {
       graphicsQuality: 'high',
       showFps: false,
@@ -372,6 +381,9 @@ export function normalizeAndMigrateProfile(
     score: nonNegInt(parsed.score),
     language: parsed.language === 'ru' ? 'ru' : 'en',
     muted: typeof parsed.muted === 'boolean' ? parsed.muted : false,
+    hasSeenTutorial: typeof parsed.hasSeenTutorial === 'boolean' ? parsed.hasSeenTutorial : false,
+    hasSeenFirstMatchHints:
+      typeof parsed.hasSeenFirstMatchHints === 'boolean' ? parsed.hasSeenFirstMatchHints : false,
     unlockedAchievements: cleanAchievements,
     friends: cleanFriends,
     settings: {
@@ -504,6 +516,8 @@ export function mergeProfiles(
     score: Math.max(a.score, b.score),
     language: primary.language,
     muted: primary.muted,
+    hasSeenTutorial: Boolean(a.hasSeenTutorial || b.hasSeenTutorial),
+    hasSeenFirstMatchHints: Boolean(a.hasSeenFirstMatchHints || b.hasSeenFirstMatchHints),
     settings: { ...primary.settings },
     unlockedAchievements: mergedAchievements,
     stats: mergedStats,

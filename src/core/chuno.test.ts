@@ -1055,3 +1055,154 @@ test('mergeProfiles, exportProfileToJson, and parseAndValidateImportedProfile pr
 
 
 
+
+test('v0.2.3 profile migration preserves v0.2.2 achievements, stats, and settings without reset', async () => {
+  const { normalizeAndMigrateProfile, mergeProfiles, APP_VERSION, getPrivacyPolicyUrl } = await import('./profileManager');
+  assert.equal(APP_VERSION, '0.2.3');
+
+  const v022Profile = {
+    schemaVersion: 2,
+    playerId: 'CHUNO-V022-KEEP',
+    displayName: 'Grandmaster',
+    score: 4850,
+    language: 'ru',
+    muted: false,
+    settings: {
+      graphicsQuality: 'medium',
+      showFps: true,
+      menuMusicEnabled: true,
+      gameMusicEnabled: false,
+      musicVolume: 0.42,
+      sfxVolume: 0.55,
+      voiceVolume: 0.7,
+      dialogueAudioMode: 'tts',
+      audioDefaultsVersion: 4,
+    },
+    unlockedAchievements: {
+      first_win: '2026-11-22T10:00:00.000Z',
+      survival_hard_win: '2026-11-23T12:00:00.000Z',
+    },
+    stats: {
+      totalMatches: 18,
+      lightWins: 10,
+      survivalHardWins: 3,
+      bestStreak: 6,
+      fastestWinSec: 92,
+    },
+  };
+
+  const { profile: migrated } = normalizeAndMigrateProfile(v022Profile);
+  assert.equal(migrated.playerId, 'CHUNO-V022-KEEP');
+  assert.equal(migrated.displayName, 'Grandmaster');
+  assert.equal(migrated.score, 4850);
+  assert.equal(migrated.unlockedAchievements.first_win, '2026-11-22T10:00:00.000Z');
+  assert.equal(migrated.unlockedAchievements.survival_hard_win, '2026-11-23T12:00:00.000Z');
+  assert.equal(migrated.stats.bestStreak, 6);
+  assert.equal(migrated.stats.fastestWinSec, 92);
+  assert.equal(migrated.settings.musicVolume, 0.42);
+  assert.equal(migrated.hasSeenTutorial, false);
+  assert.equal(migrated.hasSeenFirstMatchHints, false);
+
+  // Lossless merge preserves tutorial flags once seen
+  const seen = { ...migrated, hasSeenTutorial: true, hasSeenFirstMatchHints: true };
+  const merged = mergeProfiles(migrated, seen);
+  assert.equal(merged.hasSeenTutorial, true);
+  assert.equal(merged.hasSeenFirstMatchHints, true);
+  assert.equal(merged.score, 4850);
+
+  // Privacy Policy URL strictly uses /{lang}/legal/privacy
+  assert.equal(getPrivacyPolicyUrl('en'), 'https://buro-ecosystem-web.pages.dev/en/legal/privacy');
+  assert.equal(getPrivacyPolicyUrl('ru'), 'https://buro-ecosystem-web.pages.dev/ru/legal/privacy');
+  assert.equal(getPrivacyPolicyUrl('uz'), 'https://buro-ecosystem-web.pages.dev/uz/legal/privacy');
+});
+
+test('v0.2.3 visual guide 5-slide navigation and first-match phase hints work cleanly', async () => {
+  const {
+    GUIDE_SLIDE_COUNT,
+    clampGuideSlide,
+    nextGuideSlide,
+    prevGuideSlide,
+    resolveFirstMatchHint,
+  } = await import('./tutorialHelper');
+  const { getTranslations } = await import('./localization');
+
+  assert.equal(GUIDE_SLIDE_COUNT, 5);
+  assert.equal(getTranslations('en').guideSlides.length, 5);
+  assert.equal(getTranslations('ru').guideSlides.length, 5);
+
+  assert.equal(clampGuideSlide(-2), 0);
+  assert.equal(clampGuideSlide(99), 4);
+  assert.equal(nextGuideSlide(0), 1);
+  assert.equal(nextGuideSlide(4), 4);
+  assert.equal(prevGuideSlide(0), 0);
+  assert.equal(prevGuideSlide(3), 2);
+
+  // Phase hints match real MatchEngine phases and stop after 2 cycles or once seen
+  const drawHintRu = resolveFirstMatchHint({
+    hasSeenFirstMatchHints: false,
+    completedCycles: 0,
+    phase: 'AWAIT_DRAW_CARD',
+    activeActor: 'player',
+    language: 'ru',
+  });
+  assert.ok(drawHintRu && drawHintRu.includes('колоду'));
+
+  const moveHintEn = resolveFirstMatchHint({
+    hasSeenFirstMatchHints: false,
+    completedCycles: 1,
+    phase: 'PLAYER_MOVE_LOOP',
+    activeActor: 'player',
+    language: 'en',
+  });
+  assert.ok(moveHintEn && moveHintEn.includes('pieces'));
+
+  assert.equal(
+    resolveFirstMatchHint({
+      hasSeenFirstMatchHints: false,
+      completedCycles: 2,
+      phase: 'AWAIT_DRAW_CARD',
+      activeActor: 'player',
+      language: 'en',
+    }),
+    null,
+  );
+  assert.equal(
+    resolveFirstMatchHint({
+      hasSeenFirstMatchHints: true,
+      completedCycles: 0,
+      phase: 'AWAIT_DRAW_CARD',
+      activeActor: 'player',
+      language: 'en',
+    }),
+    null,
+  );
+});
+
+test('v0.2.3 webGuestGate resets cleanly on version bump from 0.2.2 and stays disabled in Tauri', async () => {
+  const { getWebGuestStatus, getWebGuestStorageKey, recordWebGuestMatchCompleted } = await import('./webGuestGate');
+  const map = new Map<string, string>();
+  const storage = {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      map.set(k, v);
+    },
+  };
+
+  // Exhaust 0.2.2 guest quota
+  recordWebGuestMatchCompleted({ appVersion: '0.2.2', storage, isTauri: false });
+  recordWebGuestMatchCompleted({ appVersion: '0.2.2', storage, isTauri: false });
+  recordWebGuestMatchCompleted({ appVersion: '0.2.2', storage, isTauri: false });
+  assert.equal(getWebGuestStatus({ appVersion: '0.2.2', storage, isTauri: false }).isLocked, true);
+
+  // Default APP_VERSION is now 0.2.3 -> fresh 0/3 guest allowance
+  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.2.3');
+  const v023Web = getWebGuestStatus({ storage, isTauri: false });
+  assert.equal(v023Web.isGuestMode, true);
+  assert.equal(v023Web.matchesPlayed, 0);
+  assert.equal(v023Web.isLocked, false);
+
+  // Tauri desktop stays completely unlocked
+  const v023Tauri = getWebGuestStatus({ storage, isTauri: true });
+  assert.equal(v023Tauri.isGuestMode, false);
+  assert.equal(v023Tauri.isLocked, false);
+});

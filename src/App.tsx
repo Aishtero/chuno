@@ -9,6 +9,7 @@ import { LeaderDashboardModal } from './components/LeaderDashboardModal';
 import { RulesModal } from './components/RulesModal';
 import { TitleScreen } from './components/TitleScreen';
 import { UpdaterModal } from './components/UpdaterModal';
+import { VisualGuideModal } from './components/VisualGuideModal';
 import { WebGuestModal } from './components/WebGuestModal';
 import { AchievementDefinition, MatchScoreBreakdown } from './core/achievements';
 import { AIDifficulty, evaluateBoard } from './core/chess/chessAI';
@@ -57,6 +58,10 @@ import {
   recordMatchOutcomeDetailed,
   saveProfile,
 } from './core/profileManager';
+import {
+  FIRST_MATCH_HINT_CYCLES,
+  resolveFirstMatchHint,
+} from './core/tutorialHelper';
 import {
   AvailableAppUpdate,
   checkForDesktopUpdate,
@@ -124,6 +129,10 @@ export default function App() {
   const [fpsValue, setFpsValue] = useState<number | null>(null);
 
   const [showRules, setShowRules] = useState(false);
+  const [showGuide, setShowGuide] = useState<boolean>(() => !profile.hasSeenTutorial);
+  const [guideAutoPlay, setGuideAutoPlay] = useState<boolean>(() => !profile.hasSeenTutorial);
+  const [firstMatchCycles, setFirstMatchCycles] = useState(0);
+  const prevHudActorRef = useRef<MatchActor>('player');
   const [showGodot, setShowGodot] = useState(false);
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState<'leaderboard' | 'achievements' | null>(null);
@@ -264,6 +273,9 @@ export default function App() {
     void hydrateProfileFromTauriDisk(profile).then((merged) => {
       if (!active) return;
       setProfile(merged);
+      if (merged.hasSeenTutorial) {
+        setShowGuide(false);
+      }
       setLanguage(merged.language);
       setMuted(merged.muted);
       soundManager.setMuted(merged.muted);
@@ -1722,11 +1734,72 @@ export default function App() {
     speakEvent,
   ]);
 
+  const handleOpenGuide = useCallback(() => {
+    setShowRules(false);
+    setGuideAutoPlay(false);
+    setShowGuide(true);
+  }, []);
+
+  const handleCloseGuide = useCallback(() => {
+    setShowGuide(false);
+    setGuideAutoPlay(false);
+    setProfile((prev) => {
+      if (prev.hasSeenTutorial) return prev;
+      const next: PlayerProfile = { ...prev, hasSeenTutorial: true };
+      saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  const handleDismissFirstMatchHint = useCallback(() => {
+    setProfile((prev) => {
+      if (prev.hasSeenFirstMatchHints) return prev;
+      const next: PlayerProfile = { ...prev, hasSeenFirstMatchHints: true };
+      saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  // Track completed player turn cycles in the first match to auto-retire live hints
+  useEffect(() => {
+    if (screen !== 'playing') {
+      prevHudActorRef.current = hud.activeActor;
+      return;
+    }
+    const prevActor = prevHudActorRef.current;
+    prevHudActorRef.current = hud.activeActor;
+    if (
+      prevActor === 'player' &&
+      hud.activeActor === 'opponent' &&
+      !profile.hasSeenFirstMatchHints
+    ) {
+      setFirstMatchCycles((c) => {
+        const nextCycles = c + 1;
+        if (nextCycles >= FIRST_MATCH_HINT_CYCLES) {
+          handleDismissFirstMatchHint();
+        }
+        return nextCycles;
+      });
+    }
+  }, [handleDismissFirstMatchHint, hud.activeActor, profile.hasSeenFirstMatchHints, screen]);
+
+  const activeFirstMatchHint =
+    screen === 'playing'
+      ? resolveFirstMatchHint({
+          hasSeenFirstMatchHints: profile.hasSeenFirstMatchHints,
+          completedCycles: firstMatchCycles,
+          phase: hud.phase,
+          activeActor: hud.activeActor,
+          language,
+        })
+      : null;
+
   // Global keyboard bindings with strict Space isolation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (showRules || showGodot || showLeaderboard || showAudioSettings) {
+      if (showGuide || showRules || showGodot || showLeaderboard || showAudioSettings) {
         if (e.key === 'Escape') {
+          if (showGuide) handleCloseGuide();
           setShowRules(false);
           setShowGodot(false);
           setShowLeaderboard(null);
@@ -1777,7 +1850,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleDrawCard, handlePause, handleResume, handleToggleCamera, handleToggleMute, showAudioSettings, showGodot, showLeaderboard, showRules, startNewMatch]);
+  }, [handleCloseGuide, handleDrawCard, handlePause, handleResume, handleToggleCamera, handleToggleMute, showAudioSettings, showGodot, showGuide, showLeaderboard, showRules, startNewMatch]);
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-black">
@@ -1837,6 +1910,7 @@ export default function App() {
           onChangeLanguage={handleChangeLanguage}
           onOpenAudioSettings={handleOpenAudioSettings}
           onStart={handleStartFromTitle}
+          onOpenGuide={handleOpenGuide}
           onOpenRules={handleOpenRules}
           onOpenLeaderboard={handleOpenLeaderboard}
           onOpenGodot={handleOpenGodot}
@@ -1877,9 +1951,12 @@ export default function App() {
           pendingPromoMove={pendingPromoMove}
           resurrectOptions={hud.resurrectOptions}
           selectedResurrectId={selectedResurrectId}
+          firstMatchHint={activeFirstMatchHint}
           onToggleCamera={handleToggleCamera}
           onOpenAudioSettings={handleOpenAudioSettings}
+          onOpenGuide={handleOpenGuide}
           onOpenRules={handleOpenRules}
+          onDismissFirstMatchHint={handleDismissFirstMatchHint}
           onPause={handlePause}
           onOfferDraw={handleOfferDraw}
           onResign={handleResign}
@@ -1965,6 +2042,19 @@ export default function App() {
         />
       )}
 
+      {/* Animated Visual Guide Modal (auto-opens on first launch, or via ? / How to Play) */}
+      {showGuide && (
+        <VisualGuideModal
+          language={language}
+          autoPlayInitial={guideAutoPlay}
+          onSwitchToRules={() => {
+            handleCloseGuide();
+            setShowRules(true);
+          }}
+          onClose={handleCloseGuide}
+        />
+      )}
+
       {/* Rules & Profile Modal */}
       {showRules && (
         <RulesModal
@@ -1977,6 +2067,7 @@ export default function App() {
           voiceVolume={profile.settings.voiceVolume}
           dialogueAudioMode={profile.settings.dialogueAudioMode}
           isTauri={isTauri}
+          onSwitchToGuide={handleOpenGuide}
           onExportSave={handleExportSave}
           onImportSaveJson={handleImportSaveJson}
           onCheckUpdates={() => void handleCheckUpdates()}
