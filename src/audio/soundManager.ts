@@ -100,16 +100,26 @@ class SoundManager {
     for (const ext of AUDIO_EXTS) {
       const rel = `${clean}${ext}`;
       if (this.availableAudioFiles.has(rel)) {
-        return `/audio/${rel}`;
+        return `./audio/${rel}`;
       }
     }
     return null;
   }
 
-  /** Resolve a voice path like '/audio/voices/dealer/ru/dealer_match_start_01.mp3' if present on disk */
+  /** Resolve a voice path like './audio/voices/ru/dealer/dealer_match_start_01.ogg' if present on disk */
   public resolveVoiceAsset(preferredPath: string): string | null {
-    const rel = preferredPath.replace(/^\/?audio\//i, '');
+    const rel = preferredPath.replace(/^\.?\/?audio\//i, '');
     return this.resolveAudioSlot(rel);
+  }
+
+  /** Gently dip/restore background music while a character voice clip plays (~65% volume). */
+  public setVoiceMusicDucked(ducked: boolean): void {
+    musicManager.setVoiceDucked(ducked);
+  }
+
+  /** Expose the shared unlocked AudioContext for Web Audio voice fallback playback. */
+  public getAudioContext(): AudioContext | null {
+    return this.ensureContext(false);
   }
 
   private getEffectiveSfxGain(): number {

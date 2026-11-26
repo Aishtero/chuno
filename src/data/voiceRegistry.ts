@@ -48,10 +48,34 @@ export interface VoiceRegistryEntry {
 export const VOICE_GAIN_SCALE = 0.45;
 const VOICE_VOLUME_CURVE = 1.8;
 
+/** Gain curve for system Web Speech API TTS (historically loud/harsh). */
 export function computeEffectiveVoiceVolume(sliderVolume: number): number {
   const clamped = Math.max(0, Math.min(1, sliderVolume));
   if (clamped <= 0) return 0;
   return Math.pow(clamped, VOICE_VOLUME_CURVE) * VOICE_GAIN_SCALE;
+}
+
+/**
+ * Perceptual gain curve for bundled studio-normalized (-16 LUFS) `.ogg` voice clips.
+ * Keeps speech crisp and clearly audible above background music:
+ * 0% -> 0.00, 30% -> 0.36, 60% (default) -> 0.65, 80% -> 0.83, 100% -> 1.00.
+ */
+export function computeEffectiveBundledVoiceVolume(sliderVolume: number): number {
+  const clamped = Math.max(0, Math.min(1, sliderVolume));
+  if (clamped <= 0) return 0;
+  return Math.max(0, Math.min(1, Math.pow(clamped, 0.85)));
+}
+
+function getPublicBasePrefix(): string {
+  try {
+    const base = (import.meta as unknown as { env?: { BASE_URL?: string } })?.env?.BASE_URL;
+    if (typeof base === 'string' && base.length > 0 && base !== './') {
+      return base.endsWith('/') ? base : `${base}/`;
+    }
+  } catch {
+    // Node / tsx test runtime
+  }
+  return './';
 }
 
 const ENABLE_EXTERNAL_VOICE_AUDIO = false;
@@ -986,10 +1010,87 @@ export const VOICE_REGISTRY: VoiceRegistryEntry[] = [
   },
 ];
 
+export const DEALER_VOICE_IDS_RU: ReadonlySet<string> = new Set([
+  'dealer_match_start_01',
+  'dealer_match_start_02',
+  'dealer_draw_high_01',
+  'dealer_draw_skip_01',
+  'dealer_reverse_01',
+  'dealer_resurrect_01',
+  'dealer_bullet_player_01',
+  'dealer_bullet_opponent_01',
+  'dealer_coin_survived_01',
+  'dealer_coin_shot_01',
+  'dealer_check_player_01',
+  'dealer_check_opponent_01',
+  'dealer_idle_01',
+  'dealer_idle_02',
+  'dealer_checkmate_01',
+  'dealer_checkmate_02',
+  'dealer_checkmate_03',
+  'dealer_revolver_01',
+  'dealer_revolver_02',
+  'dealer_revolver_03',
+  'dealer_win_01',
+  'dealer_draw_hard_01',
+  'dealer_draw_hard_02',
+  'dealer_draw_early_01',
+  'dealer_hard_start_01',
+  'dealer_hard_start_02',
+  'dealer_draw_acc_01',
+  'dealer_draw_dec_01',
+  'dealer_resign_01',
+]);
+
+// EN Dealer voice clips present under public/audio/voices/en/dealer/*.ogg (28/29; dealer_match_start_01 absent in source)
+export const DEALER_VOICE_IDS_EN: ReadonlySet<string> = new Set([
+  'dealer_match_start_02',
+  'dealer_draw_high_01',
+  'dealer_draw_skip_01',
+  'dealer_reverse_01',
+  'dealer_resurrect_01',
+  'dealer_bullet_player_01',
+  'dealer_bullet_opponent_01',
+  'dealer_coin_survived_01',
+  'dealer_coin_shot_01',
+  'dealer_check_player_01',
+  'dealer_check_opponent_01',
+  'dealer_idle_01',
+  'dealer_idle_02',
+  'dealer_checkmate_01',
+  'dealer_checkmate_02',
+  'dealer_checkmate_03',
+  'dealer_revolver_01',
+  'dealer_revolver_02',
+  'dealer_revolver_03',
+  'dealer_win_01',
+  'dealer_draw_hard_01',
+  'dealer_draw_hard_02',
+  'dealer_draw_early_01',
+  'dealer_hard_start_01',
+  'dealer_hard_start_02',
+  'dealer_draw_acc_01',
+  'dealer_draw_dec_01',
+  'dealer_resign_01',
+]);
+
+/**
+ * Resolves the bundled Vorbis `.ogg` voice asset path for a given entry ID & language.
+ * - `ru` -> `./audio/voices/ru/dealer/<id>.ogg`
+ * - `en` / `uz` -> `./audio/voices/en/dealer/<id>.ogg`
+ * Returns `null` when no bundled file exists (prevents 404 requests and falls back cleanly).
+ */
+export function resolveBundledVoicePath(entryId: string, lang: Language): string | null {
+  if (lang === 'ru') {
+    return DEALER_VOICE_IDS_RU.has(entryId) ? `./audio/voices/ru/dealer/${entryId}.ogg` : null;
+  }
+  return DEALER_VOICE_IDS_EN.has(entryId) ? `./audio/voices/en/dealer/${entryId}.ogg` : null;
+}
+
 export function getDialogueLine(
   speaker: DialogueSpeaker,
   event: DialogueEvent,
-  _lang: Language,
+  lang: Language,
   rng: () => number = Math.random,
 ): VoiceRegistryEntry | null {
   let pool = VOICE_REGISTRY.filter((e) => e.speaker === speaker && e.event === event);
@@ -997,7 +1098,10 @@ export function getDialogueLine(
     pool = VOICE_REGISTRY.filter((e) => e.speaker === 'calm' && e.event === event);
   }
   if (pool.length === 0) return null;
-  return pool[Math.floor(rng() * pool.length)];
+  // When multiple lines exist for the same event, prefer lines that have real bundled voice recordings
+  const voicedPool = pool.filter((e) => resolveBundledVoicePath(e.id, lang) !== null);
+  const activePool = voicedPool.length > 0 ? voicedPool : pool;
+  return activePool[Math.floor(rng() * activePool.length)];
 }
 
 export function speakerFromPersonality(
@@ -1060,8 +1164,40 @@ export function selectQualityVoice(
   return bestScore > 0 ? best : null;
 }
 
+export interface VoiceDebugSnapshot {
+  lastLineId: string | null;
+  lastLang: Language | null;
+  lastSrc: string | null;
+  backend: 'none' | 'html_audio' | 'webaudio' | 'tts' | 'sfx';
+  playStatus: 'idle' | 'starting' | 'playing' | 'ended' | 'error';
+  lastError: string | null;
+  effectiveVolume: number;
+  audio: {
+    src: string;
+    currentTime: number;
+    duration: number;
+    volume: number;
+    muted: boolean;
+    paused: boolean;
+    ended: boolean;
+    readyState: number;
+    error: string | null;
+  } | null;
+  webAudio: {
+    contextState: string;
+    duration: number;
+    elapsed: number;
+    gain: number;
+  } | null;
+}
+
 class DialogueController {
   private currentAudio: HTMLAudioElement | null = null;
+  private currentBufferSource: AudioBufferSourceNode | null = null;
+  private currentBufferGain: GainNode | null = null;
+  private currentBufferStartTime = 0;
+  private currentBufferDuration = 0;
+  private audioBufferCache = new Map<string, AudioBuffer>();
   private customAudioMap = new Map<string, string>();
   private stepTimer: number | null = null;
   private speakEndTimer: number | null = null;
@@ -1072,7 +1208,19 @@ class DialogueController {
   private cachedVoices: SpeechSynthesisVoice[] = [];
   private voicesLoaded = false;
 
+  private debugLastLineId: string | null = null;
+  private debugLastLang: Language | null = null;
+  private debugLastSrc: string | null = null;
+  private debugBackend: VoiceDebugSnapshot['backend'] = 'none';
+  private debugPlayStatus: VoiceDebugSnapshot['playStatus'] = 'idle';
+  private debugLastError: string | null = null;
+  private debugEffectiveVolume = 0;
+
   constructor() {
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __chunoVoiceDebug?: () => VoiceDebugSnapshot }).__chunoVoiceDebug = () =>
+        this.getDebugSnapshot();
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         const synth = window.speechSynthesis;
@@ -1097,9 +1245,97 @@ class DialogueController {
     }
   }
 
+  public getDebugSnapshot(): VoiceDebugSnapshot {
+    const el = this.currentAudio;
+    const ctx = soundManager.getAudioContext();
+    return {
+      lastLineId: this.debugLastLineId,
+      lastLang: this.debugLastLang,
+      lastSrc: this.debugLastSrc,
+      backend: this.debugBackend,
+      playStatus: this.debugPlayStatus,
+      lastError: this.debugLastError,
+      effectiveVolume: this.debugEffectiveVolume,
+      audio: el
+        ? {
+            src: el.src,
+            currentTime: el.currentTime,
+            duration: el.duration,
+            volume: el.volume,
+            muted: el.muted,
+            paused: el.paused,
+            ended: el.ended,
+            readyState: el.readyState,
+            error: el.error ? `${el.error.code}: ${el.error.message}` : null,
+          }
+        : null,
+      webAudio:
+        this.currentBufferSource && this.currentBufferGain && ctx
+          ? {
+              contextState: ctx.state,
+              duration: this.currentBufferDuration,
+              elapsed: Math.max(0, ctx.currentTime - this.currentBufferStartTime),
+              gain: this.currentBufferGain.gain.value,
+            }
+          : null,
+    };
+  }
+
   /** Register an optional custom .mp3/.wav/.ogg file override for any voice entry ID + language */
   public registerCustomAudio(entryId: string, lang: Language, url: string): void {
     this.customAudioMap.set(`${entryId}:${lang}`, url);
+  }
+
+  /** Play a short sample Dealer line in the current language (used by Settings "Test Voice" button). */
+  public playTestSample(
+    lang: Language,
+    opts: { muted: boolean; voiceVolume: number },
+  ): VoiceRegistryEntry | null {
+    const preferredId = lang === 'ru' ? 'dealer_match_start_01' : 'dealer_match_start_02';
+    const entry =
+      VOICE_REGISTRY.find((e) => e.id === preferredId) ??
+      getDialogueLine('dealer', 'match_start', lang);
+    if (!entry) return null;
+    this.speak(entry, lang, {
+      mode: 'tts',
+      muted: opts.muted,
+      voiceVolume: opts.voiceVolume,
+      immediate: true,
+      onSubtitleUpdate: () => {},
+      onSpeakingChange: () => {},
+    });
+    return entry;
+  }
+
+  /** Update volume/mute on any currently playing voice clip in real time. */
+  public setLiveVolume(sliderVolume: number, muted: boolean): void {
+    if (muted || sliderVolume <= 0.01) {
+      if (this.currentAudio || this.currentBufferSource) {
+        this.stop();
+      }
+      return;
+    }
+    const targetVol = computeEffectiveBundledVoiceVolume(sliderVolume);
+    this.debugEffectiveVolume = targetVol;
+    if (this.currentAudio) {
+      try {
+        this.currentAudio.volume = targetVol;
+      } catch {
+        // Ignore
+      }
+    }
+    if (this.currentBufferGain) {
+      try {
+        const ctx = soundManager.getAudioContext();
+        if (ctx) {
+          this.currentBufferGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.02);
+        } else {
+          this.currentBufferGain.gain.value = targetVol;
+        }
+      } catch {
+        // Ignore
+      }
+    }
   }
 
   public stop(): void {
@@ -1121,14 +1357,50 @@ class DialogueController {
       this.ttsWaitTimer = null;
     }
     if (this.currentAudio) {
+      const oldAudio = this.currentAudio;
+      this.currentAudio = null;
       try {
-        this.currentAudio.pause();
-        this.currentAudio.currentTime = 0;
+        oldAudio.onended = null;
+        oldAudio.onerror = null;
+        oldAudio.volume = 0;
+        oldAudio.pause();
+        oldAudio.currentTime = 0;
       } catch {
         // Ignore
       }
-      this.currentAudio = null;
     }
+    if (this.currentBufferSource) {
+      const oldSource = this.currentBufferSource;
+      const oldGain = this.currentBufferGain;
+      this.currentBufferSource = null;
+      this.currentBufferGain = null;
+      try {
+        oldSource.onended = null;
+        const ctx = soundManager.getAudioContext();
+        if (ctx && oldGain) {
+          // 18ms linear ramp-down prevents clicks when interrupting Web Audio playback
+          const now = ctx.currentTime;
+          oldGain.gain.cancelScheduledValues(now);
+          oldGain.gain.setValueAtTime(oldGain.gain.value, now);
+          oldGain.gain.linearRampToValueAtTime(0.0001, now + 0.018);
+          oldSource.stop(now + 0.02);
+        } else {
+          oldSource.stop();
+          oldSource.disconnect();
+          oldGain?.disconnect();
+        }
+      } catch {
+        // Ignore
+      }
+    } else if (this.currentBufferGain) {
+      try {
+        this.currentBufferGain.disconnect();
+      } catch {
+        // Ignore
+      }
+      this.currentBufferGain = null;
+    }
+    soundManager.setVoiceMusicDucked(false);
     soundManager.fadeOutCurrentVoice();
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
@@ -1153,6 +1425,74 @@ class DialogueController {
     return this.cachedVoices;
   }
 
+  private resolvePlaybackUrl(rawSrc: string): string {
+    if (/^(https?:|blob:|data:|\/)/i.test(rawSrc)) return rawSrc;
+    const clean = rawSrc.replace(/^\.\//, '');
+    return `${getPublicBasePrefix()}${clean}`;
+  }
+
+  private async playViaWebAudioFallback(
+    src: string,
+    targetVol: number,
+    mySession: number,
+    opts: DialogueSpeakOptions,
+  ): Promise<boolean> {
+    if (this.sessionId !== mySession) return true;
+    const ctx = soundManager.getAudioContext();
+    if (!ctx || typeof fetch !== 'function') return false;
+    try {
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      if (this.sessionId !== mySession) return true;
+
+      let buffer = this.audioBufferCache.get(src);
+      if (!buffer) {
+        const res = await fetch(src);
+        if (!res.ok) return false;
+        const arr = await res.arrayBuffer();
+        if (this.sessionId !== mySession) return true;
+        buffer = await ctx.decodeAudioData(arr.slice(0));
+        this.audioBufferCache.set(src, buffer);
+      }
+      if (this.sessionId !== mySession) return true;
+
+      const gain = ctx.createGain();
+      gain.gain.value = targetVol;
+      gain.connect(ctx.destination);
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(gain);
+
+      this.currentBufferSource = source;
+      this.currentBufferGain = gain;
+      this.currentBufferStartTime = ctx.currentTime;
+      this.currentBufferDuration = buffer.duration;
+      this.debugBackend = 'webaudio';
+      this.debugPlayStatus = 'playing';
+      this.debugEffectiveVolume = targetVol;
+      this.debugLastError = null;
+      soundManager.setVoiceMusicDucked(true);
+
+      source.onended = () => {
+        if (this.sessionId === mySession) {
+          this.currentBufferSource = null;
+          this.currentBufferGain = null;
+          this.debugPlayStatus = 'ended';
+          soundManager.setVoiceMusicDucked(false);
+          opts.onSpeakingChange(false);
+        }
+      };
+
+      source.start(0);
+      return true;
+    } catch (err) {
+      console.warn('[Voice] Web Audio fallback failed:', src, err);
+      return false;
+    }
+  }
+
   public speak(entry: VoiceRegistryEntry, lang: Language, opts: DialogueSpeakOptions): void {
     this.stop();
     const mySession = this.sessionId;
@@ -1161,6 +1501,13 @@ class DialogueController {
     this.onSpeakStateCb = opts.onSpeakingChange;
     soundManager.setVoiceVolume(opts.voiceVolume);
 
+    this.debugLastLineId = entry.id;
+    this.debugLastLang = lang;
+    this.debugLastSrc = null;
+    this.debugBackend = 'none';
+    this.debugPlayStatus = 'idle';
+    this.debugLastError = null;
+
     const audioAllowed = !opts.muted && opts.mode !== 'off' && opts.voiceVolume > 0.01;
     const wantVoice = audioAllowed && opts.mode === 'tts';
 
@@ -1168,14 +1515,19 @@ class DialogueController {
       opts.onSubtitleUpdate(text);
     }
 
-    // Priority 1: External pre-recorded audio clip (.mp3 / .ogg / .wav)
-    // Checks canonical VOICE_SCRIPT.md path `public/audio/voices/<speaker>/<lang>/<id>.mp3` first, then entry.audio[lang].
-    // When present, plays exclusively and completely disables system TTS for this phrase.
-    const canonicalPath = `/audio/voices/${entry.speaker}/${voiceLang}/${entry.id}.mp3`;
+    // Priority 1: Pre-recorded bundled / discovered voice clip (.ogg / .mp3 / .wav)
+    // Checks custom override -> bundled voice manifest (voices/<lang>/<speaker>/<id>.ogg) -> manifest discovery.
+    // When present, plays exclusively at clear audible gain with gentle background music ducking and disables system TTS.
+    const bundledSrc = resolveBundledVoicePath(entry.id, lang);
+    const canonicalPath = `./audio/voices/${voiceLang}/${entry.speaker}/${entry.id}.ogg`;
     const customSrc = this.customAudioMap.get(`${entry.id}:${voiceLang}`);
     const discoveredSrc =
-      soundManager.resolveVoiceAsset(canonicalPath) ?? soundManager.resolveVoiceAsset(entry.audio[voiceLang]);
-    const extSrc = customSrc ?? discoveredSrc ?? (ENABLE_EXTERNAL_VOICE_AUDIO ? canonicalPath : null);
+      soundManager.resolveVoiceAsset(canonicalPath) ??
+      soundManager.resolveVoiceAsset(`/audio/voices/${entry.speaker}/${voiceLang}/${entry.id}.mp3`) ??
+      soundManager.resolveVoiceAsset(entry.audio[voiceLang]);
+    const rawExtSrc = customSrc ?? bundledSrc ?? discoveredSrc ?? (ENABLE_EXTERNAL_VOICE_AUDIO ? canonicalPath : null);
+    const extSrc = rawExtSrc ? this.resolvePlaybackUrl(rawExtSrc) : null;
+
     if (wantVoice && extSrc && typeof Audio !== 'undefined') {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         try {
@@ -1185,10 +1537,17 @@ class DialogueController {
         }
       }
       try {
+        const targetVol = computeEffectiveBundledVoiceVolume(opts.voiceVolume);
         const audio = new Audio(extSrc);
-        const targetVol = computeEffectiveVoiceVolume(opts.voiceVolume);
-        audio.volume = 0;
+        audio.preload = 'auto';
+        audio.muted = false;
+        audio.volume = targetVol;
         this.currentAudio = audio;
+        this.debugLastSrc = extSrc;
+        this.debugBackend = 'html_audio';
+        this.debugPlayStatus = 'starting';
+        this.debugEffectiveVolume = targetVol;
+        soundManager.setVoiceMusicDucked(true);
         if (!opts.immediate) {
           this.runSubtitleReveal(entry, text, opts, mySession, true);
         } else {
@@ -1196,55 +1555,55 @@ class DialogueController {
         }
 
         let fellBack = false;
-        const fallbackFromAudio = () => {
+        const fallbackFromAudio = (reason?: unknown) => {
           if (fellBack || this.sessionId !== mySession) return;
           fellBack = true;
-          if (this.fadeTimer !== null) {
-            window.clearInterval(this.fadeTimer);
-            this.fadeTimer = null;
-          }
+          const errStr =
+            reason instanceof Error
+              ? `${reason.name}: ${reason.message}`
+              : audio.error
+                ? `MediaError(${audio.error.code}): ${audio.error.message}`
+                : 'HTMLAudio playback failed';
+          this.debugLastError = errStr;
+          this.debugPlayStatus = 'error';
+          console.warn('[Voice] HTMLAudioElement playback failed, trying Web Audio fallback:', extSrc, errStr);
           this.currentAudio = null;
-          this.speakWithTtsOrFallback(entry, lang, text, opts, mySession, wantVoice, audioAllowed);
+
+          void this.playViaWebAudioFallback(extSrc, targetVol, mySession, opts).then((ok) => {
+            if (ok || this.sessionId !== mySession) return;
+            soundManager.setVoiceMusicDucked(false);
+            this.speakWithTtsOrFallback(entry, lang, text, opts, mySession, wantVoice, audioAllowed);
+          });
         };
 
         audio.onended = () => {
-          if (this.fadeTimer !== null) {
-            window.clearInterval(this.fadeTimer);
-            this.fadeTimer = null;
-          }
           if (this.sessionId === mySession) {
+            this.currentAudio = null;
+            this.debugPlayStatus = 'ended';
+            soundManager.setVoiceMusicDucked(false);
             opts.onSpeakingChange(false);
           }
         };
-        audio.onerror = fallbackFromAudio;
+        audio.onerror = () => fallbackFromAudio();
 
-        audio
-          .play()
-          .then(() => {
-            if (this.sessionId !== mySession) return;
-            // Clean smooth fade-in start to avoid audio pops
-            const steps = 4;
-            let step = 0;
-            this.fadeTimer = window.setInterval(() => {
-              if (this.sessionId !== mySession || !this.currentAudio) {
-                if (this.fadeTimer !== null) {
-                  window.clearInterval(this.fadeTimer);
-                  this.fadeTimer = null;
-                }
-                return;
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise
+            .then(() => {
+              if (this.sessionId !== mySession) return;
+              this.debugPlayStatus = 'playing';
+              // Re-assert target volume in case a live slider update did not override it
+              if (this.currentAudio === audio) {
+                audio.volume = this.debugEffectiveVolume;
               }
-              step++;
-              this.currentAudio.volume = Math.min(targetVol, (targetVol * step) / steps);
-              if (step >= steps && this.fadeTimer !== null) {
-                window.clearInterval(this.fadeTimer);
-                this.fadeTimer = null;
-              }
-            }, 15);
-          })
-          .catch(fallbackFromAudio);
+            })
+            .catch((err) => fallbackFromAudio(err));
+        } else {
+          this.debugPlayStatus = 'playing';
+        }
         return;
-      } catch {
-        // Fall through cleanly to TTS / quiet SFX fallback
+      } catch (err) {
+        console.warn('[Voice] Audio creation failed:', extSrc, err);
       }
     }
 

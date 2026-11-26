@@ -407,7 +407,7 @@ const EN: Translations = {
   sfxVolumeLabel: 'SFX Volume',
   voiceVolumeLabel: 'Voice Volume',
   dialogueAudioLabel: 'Dialogue Audio',
-  dialogueModeTts: 'Voice (MP3 / TTS)',
+  dialogueModeTts: 'Voice (Audio / TTS)',
   dialogueModeSfx: 'Subtitles Only',
   dialogueModeOff: 'Off',
   cardNames: {
@@ -678,7 +678,7 @@ const RU: Translations = {
   sfxVolumeLabel: 'Звуковые эффекты',
   voiceVolumeLabel: 'Громкость голоса',
   dialogueAudioLabel: 'Режим фраз',
-  dialogueModeTts: 'Голос (MP3 / TTS)',
+  dialogueModeTts: 'Голос (Озвучка / TTS)',
   dialogueModeSfx: 'Только субтитры',
   dialogueModeOff: 'Выкл',
   cardNames: {

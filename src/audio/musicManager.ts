@@ -240,6 +240,7 @@ class MusicManager {
   private menuMusicEnabled = true;
   private gameMusicEnabled = true;
   private ducked = false;
+  private voiceDucked = false;
   private unlocked = false;
   private needsResume = false;
   private pendingCategory: MusicFolder | null = null;
@@ -366,7 +367,9 @@ class MusicManager {
       0,
       Math.min(
         1,
-        computeEffectiveMusicVolume(this.musicVolume, channel, mobileBoost) * (this.ducked ? 0.35 : 1),
+        computeEffectiveMusicVolume(this.musicVolume, channel, mobileBoost) *
+          (this.ducked ? 0.35 : 1) *
+          (this.voiceDucked ? 0.65 : 1),
       ),
     );
   }
@@ -561,6 +564,12 @@ class MusicManager {
     this.applyVolumeSmooth(280);
   }
 
+  public setVoiceDucked(ducked: boolean): void {
+    if (this.voiceDucked === ducked) return;
+    this.voiceDucked = ducked;
+    this.applyVolumeSmooth(ducked ? 200 : 420);
+  }
+
   private syncEnabledState(): void {
     if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
 
@@ -608,9 +617,9 @@ class MusicManager {
     this.stopFadeTimer();
     const el = this.currentEl;
     const startVol = el.volume;
-    if (Math.abs(targetVol - startVol) < 0.005) {
+    if (Math.abs(targetVol - startVol) < 0.0005) {
       el.volume = targetVol;
-      if (pauseWhenZero && targetVol <= 0.001) {
+      if (pauseWhenZero && targetVol <= 0.0005) {
         try {
           el.pause();
         } catch {
@@ -628,16 +637,18 @@ class MusicManager {
         }
         return;
       }
-      const liveTarget = pauseWhenZero && targetVol <= 0.001 ? 0 : this.getEffectiveVolume();
+      const liveTarget = pauseWhenZero && targetVol <= 0.0005 ? 0 : this.getEffectiveVolume();
       const p = Math.min(1, (performance.now() - start) / Math.max(50, durationMs));
-      el.volume = Math.max(0, Math.min(1, startVol + (liveTarget - startVol) * p));
+      // Smooth ease-in-out cosine curve eliminates any audible stepping clicks during ducking
+      const eased = 0.5 - 0.5 * Math.cos(Math.PI * p);
+      el.volume = Math.max(0, Math.min(1, startVol + (liveTarget - startVol) * eased));
       if (p >= 1) {
         el.volume = liveTarget;
         if (this.fadeTimer !== null) {
           window.clearInterval(this.fadeTimer);
           this.fadeTimer = null;
         }
-        if (pauseWhenZero && liveTarget <= 0.001) {
+        if (pauseWhenZero && liveTarget <= 0.0005) {
           try {
             el.pause();
           } catch {
@@ -645,7 +656,7 @@ class MusicManager {
           }
         }
       }
-    }, 30);
+    }, 16);
   }
 
   private crossfadeToFolder(folder: MusicFolder, trackIndex: number, crossfadeMs: number = CROSSFADE_MS): void {

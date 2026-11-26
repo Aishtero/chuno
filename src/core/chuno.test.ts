@@ -1066,7 +1066,7 @@ test('mergeProfiles, exportProfileToJson, and parseAndValidateImportedProfile pr
 
 test('v0.2.3 profile migration preserves v0.2.2 achievements, stats, and settings without reset', async () => {
   const { normalizeAndMigrateProfile, mergeProfiles, APP_VERSION, getPrivacyPolicyUrl } = await import('./profileManager');
-  assert.equal(APP_VERSION, '0.4.0');
+  assert.equal(APP_VERSION, '0.4.1');
 
   const v022Profile = {
     schemaVersion: 2,
@@ -1202,8 +1202,8 @@ test('v0.2.3 webGuestGate resets cleanly on version bump from 0.2.2 and stays di
   recordWebGuestMatchCompleted({ appVersion: '0.2.2', storage, isTauri: false });
   assert.equal(getWebGuestStatus({ appVersion: '0.2.2', storage, isTauri: false }).isLocked, true);
 
-  // Default APP_VERSION is now 0.4.0 -> fresh 0/3 guest allowance
-  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.4.0');
+  // Default APP_VERSION is now 0.2.3 -> fresh 0/3 guest allowance
+  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.4.1');
   const v023Web = getWebGuestStatus({ storage, isTauri: false });
   assert.equal(v023Web.isGuestMode, true);
   assert.equal(v023Web.matchesPlayed, 0);
@@ -1880,4 +1880,62 @@ test('Game invite 20s countdown helpers and friend presence sorting work accurat
     sorted.map((f) => f.friendCode),
     ['CHUNO-ONL1-0003', 'CHUNO-BSY1-0002', 'CHUNO-OFF1-0001'],
   );
+});
+
+test('Dealer bundled RU/EN voice clips resolve accurately, verify OggS files on disk, and avoid 404 on missing EN line', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const {
+    VOICE_REGISTRY,
+    DEALER_VOICE_IDS_RU,
+    DEALER_VOICE_IDS_EN,
+    resolveBundledVoicePath,
+    getDialogueLine,
+  } = await import('../data/voiceRegistry');
+
+  const dealerEntries = VOICE_REGISTRY.filter((e) => e.speaker === 'dealer');
+  assert.equal(dealerEntries.length, 29);
+  assert.equal(DEALER_VOICE_IDS_RU.size, 29);
+  assert.equal(DEALER_VOICE_IDS_EN.size, 28);
+
+  const publicRoot = path.resolve(process.cwd(), 'public');
+
+  // Every RU Dealer clip resolves and exists as a valid Ogg file
+  for (const entry of dealerEntries) {
+    const ruRel = resolveBundledVoicePath(entry.id, 'ru');
+    assert.equal(ruRel, `./audio/voices/ru/dealer/${entry.id}.ogg`);
+    const ruDisk = path.join(publicRoot, ruRel!.replace(/^\.\//, ''));
+    assert.ok(fs.existsSync(ruDisk), `Missing RU Dealer voice file: ${ruDisk}`);
+    const magic = fs.readFileSync(ruDisk).subarray(0, 4).toString('ascii');
+    assert.equal(magic, 'OggS', `Invalid Ogg magic bytes in ${ruDisk}`);
+  }
+
+  // EN & UZ map to en/dealer (28 files) and cleanly return null for the unrecorded dealer_match_start_01
+  assert.equal(resolveBundledVoicePath('dealer_match_start_01', 'en'), null);
+  assert.equal(resolveBundledVoicePath('dealer_match_start_01', 'uz'), null);
+  for (const id of DEALER_VOICE_IDS_EN) {
+    const enRel = resolveBundledVoicePath(id, 'en');
+    const uzRel = resolveBundledVoicePath(id, 'uz');
+    assert.equal(enRel, `./audio/voices/en/dealer/${id}.ogg`);
+    assert.equal(uzRel, enRel);
+    const enDisk = path.join(publicRoot, enRel!.replace(/^\.\//, ''));
+    assert.ok(fs.existsSync(enDisk), `Missing EN Dealer voice file: ${enDisk}`);
+    const magic = fs.readFileSync(enDisk).subarray(0, 4).toString('ascii');
+    assert.equal(magic, 'OggS', `Invalid Ogg magic bytes in ${enDisk}`);
+  }
+
+  // Non-Dealer entries cleanly return null (fallback path, zero 404s)
+  assert.equal(resolveBundledVoicePath('ent_match_start_01', 'en'), null);
+  assert.equal(resolveBundledVoicePath('ent_match_start_01', 'ru'), null);
+
+  // On EN match_start, getDialogueLine prefers the voiced clip (dealer_match_start_02)
+  const enStartLine = getDialogueLine('dealer', 'match_start', 'en');
+  assert.ok(enStartLine);
+  assert.equal(enStartLine.id, 'dealer_match_start_02');
+
+  // Bundled voice gain curve gives crisp, clearly audible output at default 60% slider (> 0.5)
+  const { computeEffectiveBundledVoiceVolume } = await import('../data/voiceRegistry');
+  assert.equal(computeEffectiveBundledVoiceVolume(0), 0);
+  assert.ok(computeEffectiveBundledVoiceVolume(0.6) >= 0.6 && computeEffectiveBundledVoiceVolume(0.6) <= 0.72);
+  assert.equal(computeEffectiveBundledVoiceVolume(1), 1);
 });

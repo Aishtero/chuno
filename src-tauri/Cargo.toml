@@ -1,6 +1,6 @@
 [package]
 name = "chuno"
-version = "0.4.0"
+version = "0.4.1"
 description = "ChUno — Tactical 3D Chess & Roulette Card Thriller"
 authors = ["Buro Ecosystem"]
 edition = "2021"

@@ -1789,6 +1789,7 @@ export default function App() {
   const handleChangeVoiceVolume = useCallback((volume: number) => {
     const clamped = Math.max(0, Math.min(1, volume));
     soundManager.setVoiceVolume(clamped);
+    dialogueManager.setLiveVolume(clamped, mutedRef.current);
     setProfile((prev) => {
       const next: PlayerProfile = {
         ...prev,
@@ -1812,6 +1813,19 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const handleTestVoice = useCallback(() => {
+    soundManager.unlockAudio();
+    if (mutedRef.current) return;
+    const effectiveSlider = voiceVolumeRef.current > 0.01 ? voiceVolumeRef.current : 0.6;
+    if (dialogueAudioModeRef.current !== 'tts') {
+      handleChangeDialogueAudioMode('tts');
+    }
+    dialogueManager.playTestSample(languageRef.current, {
+      muted: false,
+      voiceVolume: effectiveSlider,
+    });
+  }, [handleChangeDialogueAudioMode]);
 
   const handleToggleMenuMusic = useCallback(() => {
     setProfile((prev) => {
@@ -3362,6 +3376,7 @@ export default function App() {
           onChangeSfxVolume={handleChangeSfxVolume}
           onChangeVoiceVolume={handleChangeVoiceVolume}
           onChangeDialogueAudioMode={handleChangeDialogueAudioMode}
+          onTestVoice={handleTestVoice}
           onClose={() => setShowAudioSettings(false)}
         />
       )}

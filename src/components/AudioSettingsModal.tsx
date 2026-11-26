@@ -6,6 +6,7 @@ import {
   FileDown,
   FileUp,
   Music,
+  Play,
   RefreshCw,
   ShieldCheck,
   Volume2,
@@ -46,6 +47,7 @@ interface AudioSettingsModalProps {
   onChangeSfxVolume: (volume: number) => void;
   onChangeVoiceVolume: (volume: number) => void;
   onChangeDialogueAudioMode: (mode: DialogueAudioMode) => void;
+  onTestVoice?: () => void;
   onClose: () => void;
 }
 
@@ -76,13 +78,16 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
     onChangeSfxVolume,
     onChangeVoiceVolume,
     onChangeDialogueAudioMode,
+    onTestVoice,
     onClose,
   }) => {
     const t = getTranslations(language);
     const isSurv = mode === 'survival';
     const isRu = language === 'ru';
+    const isUz = language === 'uz';
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [saveNotice, setSaveNotice] = useState<{ ok: boolean; text: string } | null>(null);
+    const [voiceTestNotice, setVoiceTestNotice] = useState<string | null>(null);
 
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -148,10 +153,10 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        <div className={`w-full max-w-md rounded-xl border shadow-2xl overflow-hidden ${panelClass}`}>
+        <div className={`w-full max-w-md max-h-[90vh] flex flex-col rounded-xl border shadow-2xl overflow-hidden ${panelClass}`}>
           {/* Header */}
           <div
-            className={`flex items-center justify-between px-5 py-4 border-b ${
+            className={`flex items-center justify-between px-5 py-4 border-b shrink-0 ${
               isSurv ? 'border-stone-800' : 'border-stone-200'
             }`}
           >
@@ -177,7 +182,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
             </button>
           </div>
 
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-4 overflow-y-auto flex-1">
             {/* Quick Mute All Toggle */}
             <button
               type="button"
@@ -329,10 +334,64 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
                 />
               </div>
 
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-xs">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
                   <span className={`font-medium ${mutedLabelClass}`}>{t.voiceVolumeLabel}</span>
-                  <span className="font-mono-num font-semibold">{Math.round(voiceVolume * 100)}%</span>
+                  <div className="flex items-center gap-2">
+                    {onTestVoice && (
+                      <button
+                        type="button"
+                        data-testid="test-voice-btn"
+                        onClick={() => {
+                          if (muted) {
+                            setVoiceTestNotice(
+                              isRu
+                                ? 'Звук выключен — сначала снимите Mute выше'
+                                : isUz
+                                  ? 'Ovoz o‘chirilgan — avval ovozni yoqing'
+                                  : 'Audio is muted — unmute above first',
+                            );
+                            return;
+                          }
+                          if (voiceVolume <= 0.01) {
+                            setVoiceTestNotice(
+                              isRu
+                                ? 'Поднимите ползунок громкости голоса выше 0%'
+                                : isUz
+                                  ? 'Ovoz balandligini 0% dan yuqoriga ko‘taring'
+                                  : 'Raise Voice Volume above 0%',
+                            );
+                            return;
+                          }
+                          onTestVoice();
+                          setVoiceTestNotice(
+                            isRu
+                              ? 'Проигрывается реплика Дилера...'
+                              : isUz
+                                ? 'Diler ovozi ijro etilmoqda...'
+                                : 'Playing Dealer voice sample...',
+                          );
+                        }}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-colors cursor-pointer ${
+                          isSurv
+                            ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+                            : 'border-stone-300 bg-white text-stone-800 hover:bg-stone-100'
+                        }`}
+                      >
+                        <Play className="w-3 h-3 fill-current" aria-hidden="true" />
+                        <span>
+                          {isRu
+                            ? 'Проверить голос'
+                            : isUz
+                              ? 'Ovozni tekshirish'
+                              : 'Test Voice'}
+                        </span>
+                      </button>
+                    )}
+                    <span className="font-mono-num font-semibold w-9 text-right">
+                      {Math.round(voiceVolume * 100)}%
+                    </span>
+                  </div>
                 </div>
                 <input
                   type="range"
@@ -344,6 +403,16 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
                   onChange={(e) => onChangeVoiceVolume(Number(e.target.value) / 100)}
                   className="w-full accent-amber-500 cursor-pointer"
                 />
+                {voiceTestNotice && (
+                  <div
+                    data-testid="test-voice-notice"
+                    className={`text-[11px] font-medium ${
+                      muted || voiceVolume <= 0.01 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    {voiceTestNotice}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -516,7 +585,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
           </div>
 
           <div
-            className={`px-5 py-3 border-t flex justify-end ${
+            className={`px-5 py-3 border-t flex justify-end shrink-0 ${
               isSurv ? 'border-stone-800' : 'border-stone-200'
             }`}
           >
