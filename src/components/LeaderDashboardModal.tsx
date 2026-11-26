@@ -1,22 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Award,
   Check,
-  Copy,
   Flame,
   Globe,
   Pencil,
-  Play,
-  Send,
   Skull,
-  Trash2,
   Trophy,
-  UserPlus,
   Users,
   X,
 } from 'lucide-react';
 import { ACHIEVEMENTS } from '../core/achievements';
-import { copyTextToClipboard } from '../core/clipboard';
 import { GameMode } from '../core/deck/cardData';
 import {
   LeaderboardCategory,
@@ -25,35 +19,24 @@ import {
 } from '../core/leaderboardService';
 import { Language, getTranslations } from '../core/localization';
 import {
-  PublicRoomListing,
-  fetchFriendsOnlineRooms,
-  formatPublicRoomModeBadge,
-} from '../core/onlineClient';
-import {
   NICKNAME_MAX_LEN,
   PlayerProfile,
-  normalizeFriendCode,
   validateNickname,
 } from '../core/profileManager';
 import { AchievementsPanel } from './AchievementsPanel';
 import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
 
-export type LeaderModalTab = 'leaderboard' | 'achievements' | 'friends';
+export type LeaderModalTab = 'leaderboard' | 'achievements';
 
 interface LeaderDashboardModalProps {
   profile: PlayerProfile;
   language: Language;
   mode: GameMode;
   initialTab?: LeaderModalTab;
+  friendsCount?: number;
+  incomingFriendRequestsCount?: number;
   onUpdateDisplayName: (name: string) => void;
-  onAddFriend?: (
-    friendCode: string,
-    nickname?: string,
-    avatarId?: string,
-  ) => { ok: true; alreadyExists: boolean } | { ok: false; error: 'invalid_code' | 'self' };
-  onRemoveFriend?: (friendCode: string) => void;
-  onInviteFriend?: (friendCode: string) => Promise<boolean> | void;
-  onJoinFriendRoom?: (roomCode: string) => void;
+  onOpenFriends?: () => void;
   onOpenProfile?: () => void;
   onClose: () => void;
 }
@@ -63,11 +46,10 @@ export const LeaderDashboardModal: React.FC<LeaderDashboardModalProps> = ({
   language,
   mode,
   initialTab = 'leaderboard',
+  friendsCount,
+  incomingFriendRequestsCount = 0,
   onUpdateDisplayName,
-  onAddFriend,
-  onRemoveFriend,
-  onInviteFriend,
-  onJoinFriendRoom,
+  onOpenFriends,
   onOpenProfile,
   onClose,
 }) => {
@@ -81,17 +63,8 @@ export const LeaderDashboardModal: React.FC<LeaderDashboardModalProps> = ({
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(profile.nickname || profile.displayName);
-  const [copiedId, setCopiedId] = useState(false);
 
-  // Friends tab state
-  const [friendCodeInput, setFriendCodeInput] = useState('');
-  const [friendNameInput, setFriendNameInput] = useState('');
-  const [friendFormError, setFriendFormError] = useState<string | null>(null);
-  const [addingFriend, setAddingFriend] = useState(false);
-  const [invitedFriendCode, setInvitedFriendCode] = useState<string | null>(null);
-  const [friendRooms, setFriendRooms] = useState<Record<string, PublicRoomListing>>({});
-
-  const friendsList = profile.friends ?? [];
+  const displayedFriendsCount = friendsCount ?? (profile.friends ?? []).length;
 
   const unlockedCount = useMemo(
     () => ACHIEVEMENTS.filter((a) => Boolean(profile.unlockedAchievements[a.id])).length,
@@ -114,29 +87,6 @@ export const LeaderDashboardModal: React.FC<LeaderDashboardModalProps> = ({
     };
   }, [profile, category]);
 
-  // Poll server for any friends currently waiting in open public rooms
-  const refreshFriendStatuses = useCallback(async () => {
-    if (friendsList.length === 0) {
-      setFriendRooms({});
-      return;
-    }
-    try {
-      const rooms = await fetchFriendsOnlineRooms(friendsList.map((f) => f.friendCode));
-      setFriendRooms(rooms);
-    } catch {
-      // Server offline — graceful offline Friends list
-    }
-  }, [friendsList]);
-
-  useEffect(() => {
-    if (mainTab !== 'friends') return;
-    void refreshFriendStatuses();
-    const id = window.setInterval(() => {
-      void refreshFriendStatuses();
-    }, 5000);
-    return () => window.clearInterval(id);
-  }, [mainTab, refreshFriendStatuses]);
-
   const playerRank = useMemo(() => {
     const idx = entries.findIndex((e) => e.isLocalPlayer);
     return idx >= 0 ? idx + 1 : entries.length + 1;
@@ -150,57 +100,6 @@ export const LeaderDashboardModal: React.FC<LeaderDashboardModalProps> = ({
       setDraftName(profile.nickname || profile.displayName);
     }
     setEditingName(false);
-  };
-
-  const copyPlayerId = () => {
-    void copyTextToClipboard(profile.playerId).then(() => {
-      setCopiedId(true);
-      window.setTimeout(() => setCopiedId(false), 2000);
-    });
-  };
-
-  const handleSubmitAddFriend = async () => {
-    if (!onAddFriend) return;
-    const cleaned = normalizeFriendCode(friendCodeInput);
-    if (!cleaned) {
-      setFriendFormError(t.friendErrInvalidCode);
-      return;
-    }
-    if (cleaned === normalizeFriendCode(profile.playerId)) {
-      setFriendFormError(t.friendErrSelf);
-      return;
-    }
-    setAddingFriend(true);
-    setFriendFormError(null);
-    let resolvedNick = friendNameInput.trim() || undefined;
-    let resolvedAvatar: string | undefined;
-
-    // If friend is currently online in an open room on the server, auto-pull live nickname & skin
-    try {
-      const statusMap = await fetchFriendsOnlineRooms([cleaned]);
-      const liveRoom = statusMap[cleaned];
-      if (liveRoom) {
-        resolvedNick = liveRoom.hostNickname;
-        resolvedAvatar = liveRoom.hostAvatarId;
-        setFriendRooms((prev) => ({ ...prev, [cleaned]: liveRoom }));
-      }
-    } catch {
-      // Server offline; proceed with manual/default entry
-    }
-
-    const res = onAddFriend(cleaned, resolvedNick, resolvedAvatar);
-    setAddingFriend(false);
-    if (!res.ok) {
-      setFriendFormError(res.error === 'self' ? t.friendErrSelf : t.friendErrInvalidCode);
-      return;
-    }
-    if (res.alreadyExists) {
-      setFriendFormError(t.friendErrDuplicate);
-      return;
-    }
-    setFriendCodeInput('');
-    setFriendNameInput('');
-    setFriendFormError(null);
   };
 
   const panelClass = isSurv
@@ -335,26 +234,29 @@ export const LeaderDashboardModal: React.FC<LeaderDashboardModalProps> = ({
               </span>
             </button>
 
-            <button
-              type="button"
-              data-tab="friends"
-              onClick={() => setMainTab('friends')}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors cursor-pointer ${
-                mainTab === 'friends'
-                  ? isSurv
-                    ? 'bg-amber-600 text-stone-950'
-                    : 'bg-stone-900 text-white'
-                  : isSurv
-                    ? 'text-stone-400 hover:text-stone-100 hover:bg-stone-900'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              <span>
-                {t.friendsTab}{' '}
-                <span className="font-mono-num opacity-80">({friendsList.length})</span>
-              </span>
-            </button>
+            {onOpenFriends && (
+              <button
+                type="button"
+                data-testid="leader-open-friends"
+                onClick={onOpenFriends}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-colors cursor-pointer ${
+                  isSurv
+                    ? 'border-stone-700 text-stone-300 hover:text-amber-300 hover:border-amber-500/50 hover:bg-stone-900'
+                    : 'border-stone-300 text-stone-700 hover:text-stone-950 hover:bg-stone-100'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>
+                  {t.friendsTab}{' '}
+                  <span className="font-mono-num opacity-80">({displayedFriendsCount})</span>
+                </span>
+                {incomingFriendRequestsCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white font-mono-num text-[10px] font-bold">
+                    {incomingFriendRequestsCount}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
 
           <button
@@ -470,222 +372,25 @@ export const LeaderDashboardModal: React.FC<LeaderDashboardModalProps> = ({
                   </div>
                   <div className="font-mono-num text-base font-bold">{profile.stats.currentStreak}</div>
                 </div>
-                <div className={`px-2.5 py-1.5 rounded-lg border ${isSurv ? 'border-stone-800 bg-stone-950' : 'border-stone-200 bg-white'}`}>
+                <button
+                  type="button"
+                  disabled={!onOpenFriends}
+                  onClick={onOpenFriends}
+                  className={`px-2.5 py-1.5 rounded-lg border transition-colors ${
+                    isSurv ? 'border-stone-800 bg-stone-950' : 'border-stone-200 bg-white'
+                  } ${onOpenFriends ? 'cursor-pointer hover:border-amber-500/60' : 'cursor-default'}`}
+                >
                   <div className={`text-[10px] uppercase tracking-wider ${mutedText}`}>
                     {isRu ? 'Друзья' : isUz ? 'Do‘stlar' : 'Friends'}
                   </div>
-                  <div className="font-mono-num text-base font-bold">{friendsList.length}</div>
-                </div>
+                  <div className="font-mono-num text-base font-bold">{displayedFriendsCount}</div>
+                </button>
               </div>
             </div>
           </div>
 
           {mainTab === 'achievements' ? (
             <AchievementsPanel profile={profile} language={language} mode={mode} />
-          ) : mainTab === 'friends' ? (
-            /* Full Interactive Friends List Panel */
-            <div className="space-y-4" data-testid="friends-panel">
-              {/* Your Friend Code Card */}
-              <div className={`p-4 rounded-xl border ${subBoxClass} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
-                <div>
-                  <div className={`text-[11px] font-semibold uppercase tracking-wider ${mutedText}`}>
-                    {t.yourFriendCodeLabel}
-                  </div>
-                  <div
-                    data-testid="player-id"
-                    onClick={copyPlayerId}
-                    className="font-mono-num text-lg font-bold tracking-wider text-amber-500 select-all cursor-pointer mt-0.5"
-                  >
-                    {profile.playerId}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  data-testid="copy-my-friend-code"
-                  onClick={copyPlayerId}
-                  className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    copiedId
-                      ? 'bg-emerald-600 border-emerald-500 text-white'
-                      : isSurv
-                        ? 'bg-stone-950 border-amber-500/50 text-amber-300 hover:bg-amber-600 hover:text-stone-950'
-                        : 'bg-white border-stone-400 text-stone-900 hover:bg-stone-900 hover:text-white'
-                  }`}
-                >
-                  {copiedId ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedId ? t.onlineCodeCopied : t.onlineCopyCode}</span>
-                </button>
-              </div>
-
-              {/* Add Friend by Code Form */}
-              <div className={`p-4 rounded-xl border ${subBoxClass} space-y-3`}>
-                <div className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <UserPlus className="w-3.5 h-3.5 text-amber-500" />
-                  <span>{t.addFriendByCodeTitle}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
-                  <input
-                    type="text"
-                    data-testid="add-friend-code-input"
-                    value={friendCodeInput}
-                    maxLength={15}
-                    placeholder={t.friendCodePlaceholder}
-                    onChange={(e) => {
-                      setFriendCodeInput(e.target.value.toUpperCase());
-                      setFriendFormError(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void handleSubmitAddFriend();
-                    }}
-                    className={`px-3 py-2 rounded-lg border font-mono-num text-xs font-bold tracking-wider uppercase outline-none ${
-                      isSurv
-                        ? 'bg-stone-950 border-stone-700 focus:border-amber-500 text-stone-100'
-                        : 'bg-white border-stone-300 focus:border-stone-900 text-stone-900'
-                    }`}
-                  />
-                  <input
-                    type="text"
-                    data-testid="add-friend-name-input"
-                    value={friendNameInput}
-                    maxLength={NICKNAME_MAX_LEN}
-                    placeholder={t.friendNameOptionalPlaceholder}
-                    onChange={(e) => setFriendNameInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void handleSubmitAddFriend();
-                    }}
-                    className={`px-3 py-2 rounded-lg border text-xs font-medium outline-none ${
-                      isSurv
-                        ? 'bg-stone-950 border-stone-700 focus:border-amber-500 text-stone-100'
-                        : 'bg-white border-stone-300 focus:border-stone-900 text-stone-900'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    data-testid="add-friend-submit"
-                    disabled={addingFriend}
-                    onClick={() => void handleSubmitAddFriend()}
-                    className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
-                      isSurv
-                        ? 'bg-amber-600 hover:bg-amber-500 text-stone-950'
-                        : 'bg-stone-900 hover:bg-stone-800 text-white'
-                    }`}
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>{t.addFriendSubmitBtn}</span>
-                  </button>
-                </div>
-                {friendFormError && (
-                  <div className="text-xs text-red-400 font-medium" role="alert">
-                    {friendFormError}
-                  </div>
-                )}
-              </div>
-
-              {/* Added Friends List */}
-              {friendsList.length === 0 ? (
-                <div className={`p-6 rounded-xl border text-center text-xs ${subBoxClass} ${mutedText}`}>
-                  {t.friendsEmptyHint}
-                </div>
-              ) : (
-                <div className="space-y-2.5" data-testid="friends-list">
-                  {friendsList.map((friend) => {
-                    const liveRoom = friendRooms[friend.friendCode];
-                    const shownNick = liveRoom?.hostNickname || friend.nickname;
-                    const shownAvatar = liveRoom?.hostAvatarId || friend.avatarId;
-                    const isInvited = invitedFriendCode === friend.friendCode;
-
-                    return (
-                      <div
-                        key={friend.friendCode}
-                        data-friend-row={friend.friendCode}
-                        className={`p-3.5 rounded-xl border ${subBoxClass} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <PlayerAvatarPortrait avatarId={shownAvatar} size={44} />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-bold truncate">{shownNick}</span>
-                              {liveRoom && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/40 text-emerald-500">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                                  <span>
-                                    {t.friendOnlineNow} · {formatPublicRoomModeBadge(liveRoom, language)}
-                                  </span>
-                                </span>
-                              )}
-                            </div>
-                            <div className={`text-[11px] flex items-center gap-2 flex-wrap mt-0.5 ${mutedText}`}>
-                              <span className="font-mono-num">{friend.friendCode}</span>
-                              <span aria-hidden="true">·</span>
-                              <span>
-                                {t.friendMatchesTogether}: <strong className="font-mono-num">{friend.matchesTogether}</strong>
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                          {liveRoom && onJoinFriendRoom && (
-                            <button
-                              type="button"
-                              data-friend-join={friend.friendCode}
-                              onClick={() => onJoinFriendRoom(liveRoom.code)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer"
-                            >
-                              <Play className="w-3.5 h-3.5" />
-                              <span>{t.friendJoinOpenRoomBtn}</span>
-                            </button>
-                          )}
-
-                          {onInviteFriend && (
-                            <button
-                              type="button"
-                              data-friend-invite={friend.friendCode}
-                              onClick={() => {
-                                void Promise.resolve(onInviteFriend(friend.friendCode)).then(() => {
-                                  setInvitedFriendCode(friend.friendCode);
-                                  window.setTimeout(() => setInvitedFriendCode(null), 2200);
-                                });
-                              }}
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                                isInvited
-                                  ? 'bg-emerald-600 border-emerald-500 text-white'
-                                  : isSurv
-                                    ? 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-600 hover:text-stone-950'
-                                    : 'border-stone-300 bg-white text-stone-800 hover:bg-stone-900 hover:text-white'
-                              }`}
-                            >
-                              {isInvited ? (
-                                <Check className="w-3.5 h-3.5" />
-                              ) : (
-                                <Send className="w-3.5 h-3.5" />
-                              )}
-                              <span>{isInvited ? t.friendInviteCopied : t.friendInviteBtn}</span>
-                            </button>
-                          )}
-
-                          {onRemoveFriend && (
-                            <button
-                              type="button"
-                              data-friend-remove={friend.friendCode}
-                              title={t.friendRemoveBtn}
-                              aria-label={t.friendRemoveBtn}
-                              onClick={() => onRemoveFriend(friend.friendCode)}
-                              className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                                isSurv
-                                  ? 'border-stone-800 text-stone-400 hover:text-red-400 hover:border-red-900/60 hover:bg-red-950/30'
-                                  : 'border-stone-200 text-stone-500 hover:text-red-600 hover:border-red-200 hover:bg-red-50'
-                              }`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           ) : (
             <div className="space-y-4">
               {/* Leaderboard Category Tabs */}

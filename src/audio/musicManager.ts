@@ -1,5 +1,100 @@
 export type MusicFolder = 'survival' | 'friendly' | 'friendly_background' | 'unknown';
 export type MusicContext = 'menu' | 'game';
+export type MusicTrackChoiceId = 'sunlight' | 'meadow' | 'iron_girders' | 'midnight';
+export type MusicTrackPreference = 'auto' | MusicTrackChoiceId;
+
+export interface MusicTrackCatalogEntry {
+  id: MusicTrackChoiceId;
+  folder: MusicFolder;
+  labels: Record<'en' | 'ru' | 'uz', string>;
+}
+
+export const MUSIC_TRACK_CATALOG: readonly MusicTrackCatalogEntry[] = [
+  {
+    id: 'sunlight',
+    folder: 'friendly',
+    labels: {
+      en: 'Sunlight on the Manuscript',
+      ru: 'Свет на манускрипте',
+      uz: 'Qo‘lyozmadagi quyosh',
+    },
+  },
+  {
+    id: 'meadow',
+    folder: 'friendly_background',
+    labels: {
+      en: 'Meadow Breeze',
+      ru: 'Луговой бриз',
+      uz: 'O‘tloq shabadasi',
+    },
+  },
+  {
+    id: 'iron_girders',
+    folder: 'survival',
+    labels: {
+      en: 'Beneath the Iron Girders',
+      ru: 'Под железными балками',
+      uz: 'Temir to‘sinlar ostida',
+    },
+  },
+  {
+    id: 'midnight',
+    folder: 'unknown',
+    labels: {
+      en: 'Midnight Horizon',
+      ru: 'Полуночный горизонт',
+      uz: 'Yarim tun ufqi',
+    },
+  },
+] as const;
+
+export const MUSIC_PREFERENCE_ORDER: readonly MusicTrackPreference[] = [
+  'auto',
+  'sunlight',
+  'meadow',
+  'iron_girders',
+  'midnight',
+] as const;
+
+export function isValidMusicTrackPreference(raw: unknown): raw is MusicTrackPreference {
+  return (
+    raw === 'auto' ||
+    raw === 'sunlight' ||
+    raw === 'meadow' ||
+    raw === 'iron_girders' ||
+    raw === 'midnight'
+  );
+}
+
+export function resolveMusicFolderForPreference(
+  preference: MusicTrackPreference,
+  autoFolder: MusicFolder | null,
+): MusicFolder | null {
+  if (preference === 'auto') return autoFolder;
+  const entry = MUSIC_TRACK_CATALOG.find((t) => t.id === preference);
+  return entry ? entry.folder : autoFolder;
+}
+
+export function getNextMusicTrackPreference(
+  current: MusicTrackPreference,
+  step: 1 | -1 = 1,
+): MusicTrackPreference {
+  const idx = MUSIC_PREFERENCE_ORDER.indexOf(current);
+  const base = idx >= 0 ? idx : 0;
+  const next = (base + step + MUSIC_PREFERENCE_ORDER.length) % MUSIC_PREFERENCE_ORDER.length;
+  return MUSIC_PREFERENCE_ORDER[next];
+}
+
+export function getMusicTrackLabel(
+  pref: MusicTrackPreference,
+  lang: 'en' | 'ru' | 'uz',
+): string {
+  if (pref === 'auto') {
+    return lang === 'ru' ? 'Авто (по режиму)' : lang === 'uz' ? 'Avto (rejim bo‘yicha)' : 'Auto (by mode)';
+  }
+  const entry = MUSIC_TRACK_CATALOG.find((t) => t.id === pref);
+  return entry ? (entry.labels[lang] ?? entry.labels.en) : pref;
+}
 
 const CROSSFADE_MS = 900;
 const UNKNOWN_CROSSFADE_MS = 1200;
@@ -152,6 +247,8 @@ class MusicManager {
   private decodeErrorOccurred = false;
 
   private desiredFolder: MusicFolder | null = null;
+  private autoFolder: MusicFolder | null = null;
+  private trackPreference: MusicTrackPreference = 'auto';
   private desiredContext: MusicContext = 'menu';
 
   private activeFolder: MusicFolder | null = null;
@@ -281,11 +378,24 @@ class MusicManager {
    *   continues seamlessly without restarting!
    * - If the folder is empty, silently fades out previous track with 0 console errors.
    */
+  public getTrackPreference(): MusicTrackPreference {
+    return this.trackPreference;
+  }
+
+  public setTrackPreference(pref: MusicTrackPreference): void {
+    const safe: MusicTrackPreference = isValidMusicTrackPreference(pref) ? pref : 'auto';
+    if (this.trackPreference === safe) return;
+    this.trackPreference = safe;
+    this.setChannel(this.autoFolder, this.desiredContext);
+  }
+
   public setChannel(folder: MusicFolder | null, context: MusicContext): void {
+    this.autoFolder = folder;
+    const preferredFolder = resolveMusicFolderForPreference(this.trackPreference, folder);
     const resolvedFolder: MusicFolder | null =
-      folder === 'unknown' && (FOLDER_PLAYLISTS.unknown?.length ?? 0) === 0
+      preferredFolder === 'unknown' && (FOLDER_PLAYLISTS.unknown?.length ?? 0) === 0
         ? 'friendly_background'
-        : folder;
+        : preferredFolder;
     const prevFolder = this.activeFolder ?? this.desiredFolder;
     this.desiredFolder = resolvedFolder;
     this.desiredContext = context;

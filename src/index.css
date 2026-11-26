@@ -230,3 +230,124 @@
   transform-origin: center;
   animation: chuno-coin-flip 2.4s ease-in-out infinite;
 }
+
+/* Smooth GPU-accelerated Emote Picker & Comic Speech Bubbles */
+@keyframes chuno-emote-picker-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes chuno-emote-bubble-in-player {
+  0% {
+    opacity: 0;
+    transform: translate3d(-6px, 14px, 0) scale(0.62);
+  }
+  68% {
+    opacity: 1;
+    transform: translate3d(0, -2px, 0) scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes chuno-emote-bubble-in-opponent {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -14px, 0) scale(0.62);
+  }
+  68% {
+    opacity: 1;
+    transform: translate3d(0, 2px, 0) scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes chuno-emote-bubble-out {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0) scale(0.88);
+  }
+}
+
+.emote-picker-enter {
+  transform-origin: bottom left;
+  will-change: transform, opacity;
+  animation: chuno-emote-picker-in 220ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.emote-bubble-in-player {
+  transform-origin: bottom left;
+  will-change: transform, opacity;
+  animation: chuno-emote-bubble-in-player 320ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.emote-bubble-in-opponent {
+  transform-origin: top center;
+  will-change: transform, opacity;
+  animation: chuno-emote-bubble-in-opponent 320ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.emote-bubble-out {
+  will-change: transform, opacity;
+  animation: chuno-emote-bubble-out 280ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes chuno-invite-slide-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -18px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.invite-banner-enter {
+  will-change: transform, opacity;
+  animation: chuno-invite-slide-in 240ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emote-picker-enter,
+  .emote-bubble-in-player,
+  .emote-bubble-in-opponent {
+    animation: chuno-emote-reduced-in 180ms ease-out forwards;
+  }
+  .emote-bubble-out {
+    animation: chuno-emote-reduced-out 180ms ease-in forwards;
+  }
+}
+
+@keyframes chuno-emote-reduced-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes chuno-emote-reduced-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}

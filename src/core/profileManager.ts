@@ -13,10 +13,11 @@ import {
   LightPersonality,
 } from './deck/cardData';
 import { AvatarId, DEFAULT_AVATAR_ID, isValidAvatarId } from '../data/playerAvatars';
+import { MusicTrackPreference, isValidMusicTrackPreference } from '../audio/musicManager';
 import { Language } from './localization';
 import { MatchEndReason } from './match/matchEngine';
 
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.4.0';
 export const CURRENT_PROFILE_SCHEMA_VERSION = 4;
 export const CURRENT_AUDIO_DEFAULTS_VERSION = 4;
 export const NICKNAME_MIN_LEN = 2;
@@ -65,6 +66,7 @@ export interface PlayerSettings {
   sfxVolume: number;
   voiceVolume: number;
   dialogueAudioMode: DialogueAudioMode;
+  musicTrackPreference?: MusicTrackPreference;
   audioDefaultsVersion?: number;
 }
 
@@ -183,6 +185,7 @@ export function createDefaultProfile(): PlayerProfile {
       sfxVolume: 0.35,
       voiceVolume: 0.6,
       dialogueAudioMode: 'tts',
+      musicTrackPreference: 'auto',
       audioDefaultsVersion: CURRENT_AUDIO_DEFAULTS_VERSION,
     },
     unlockedAchievements: {},
@@ -318,6 +321,12 @@ export function normalizeAndMigrateProfile(
     rawSettings.graphicsQuality === 'high'
       ? rawSettings.graphicsQuality
       : def.settings.graphicsQuality;
+
+  const musicTrackPref: MusicTrackPreference = isValidMusicTrackPreference(
+    rawSettings.musicTrackPreference,
+  )
+    ? rawSettings.musicTrackPreference
+    : 'auto';
 
   const rawLightByPers: Partial<PlayerStats['lightByPersonality']> =
     rawStats.lightByPersonality && typeof rawStats.lightByPersonality === 'object'
@@ -482,6 +491,7 @@ export function normalizeAndMigrateProfile(
       sfxVolume: sfxVol,
       voiceVolume: voiceVol,
       dialogueAudioMode: dialMode,
+      musicTrackPreference: musicTrackPref,
       audioDefaultsVersion: CURRENT_AUDIO_DEFAULTS_VERSION,
     },
     stats: mergedStats,

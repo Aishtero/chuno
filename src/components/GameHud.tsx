@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BookOpen, Check, Clock, Eye, Flag, Handshake, HelpCircle, Lock, Pause, UserPlus, Volume2, VolumeX, X } from 'lucide-react';
+import { BookOpen, Check, Clock, Eye, Flag, Handshake, HelpCircle, Lock, Music, Pause, SkipForward, UserPlus, Volume2, VolumeX, X } from 'lucide-react';
+import { MusicTrackPreference, getMusicTrackLabel } from '../audio/musicManager';
 import { PieceColor, PieceType, PromotablePieceType } from '../core/chess/types';
 import { CardType, GameMode } from '../core/deck/cardData';
 import { Language, formatMatchTime, getTranslations } from '../core/localization';
 import { CoinSide, MatchActor, MatchPhase } from '../core/match/matchEngine';
 import { formatThinkTimeMs } from '../core/onlineClient';
+import { OpponentRelationStatus } from '../core/socialClient';
 import { AvatarId } from '../data/playerAvatars';
 import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
 
@@ -20,8 +22,9 @@ export interface OnlineHudInfo {
   opponentNickname: string;
   opponentAvatarId: string;
   opponentFriendCode?: string | null;
-  opponentIsFriend?: boolean;
-  onAddOpponentFriend?: () => void;
+  opponentRelation?: OpponentRelationStatus;
+  onSendOpponentFriendRequest?: () => void;
+  onAcceptOpponentFriendRequest?: () => void;
   yourThinkTimeMs: number;
   opponentThinkTimeMs: number;
   activeSide: 'player' | 'opponent';
@@ -131,6 +134,7 @@ interface GameHudProps {
   elapsedSeconds: number;
   tacticalCam: boolean;
   muted: boolean;
+  musicTrackPreference?: MusicTrackPreference;
   speechText: string | null;
   playerNickname?: string;
   playerAvatarId?: AvatarId;
@@ -144,6 +148,7 @@ interface GameHudProps {
   resurrectOptions: { pieceId: number; type: PieceType; legalSquares: number[] }[];
   selectedResurrectId: number | null;
   onToggleCamera: () => void;
+  onCycleMusicTrack?: () => void;
   onOpenAudioSettings: () => void;
   onOpenGuide: () => void;
   onOpenRules: () => void;
@@ -178,6 +183,7 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   elapsedSeconds,
   tacticalCam,
   muted,
+  musicTrackPreference = 'auto',
   speechText,
   playerNickname,
   playerAvatarId,
@@ -191,6 +197,7 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   resurrectOptions,
   selectedResurrectId,
   onToggleCamera,
+  onCycleMusicTrack,
   onOpenAudioSettings,
   onOpenGuide,
   onOpenRules,
@@ -343,7 +350,7 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
                   <PlayerAvatarPortrait avatarId={onlineHud.opponentAvatarId} size={16} />
                   <span className="truncate font-semibold max-w-[60px]">{onlineHud.opponentNickname}</span>
                   {onlineHud.opponentFriendCode && (
-                    onlineHud.opponentIsFriend ? (
+                    onlineHud.opponentRelation === 'friend' ? (
                       <span
                         data-testid="hud-friend-badge"
                         title={t.addedFriendBadge}
@@ -351,8 +358,31 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
                       >
                         <Check className="w-2.5 h-2.5" />
                       </span>
+                    ) : onlineHud.opponentRelation === 'incoming' &&
+                      onlineHud.onAcceptOpponentFriendRequest ? (
+                      <button
+                        type="button"
+                        data-testid="hud-accept-friend"
+                        title={language === 'ru' ? 'Принять заявку' : language === 'uz' ? 'Qabul qilish' : 'Accept Request'}
+                        aria-label={language === 'ru' ? 'Принять заявку' : language === 'uz' ? 'Qabul qilish' : 'Accept Request'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onlineHud.onAcceptOpponentFriendRequest?.();
+                        }}
+                        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-600 text-white hover:bg-emerald-500 transition-colors shrink-0 cursor-pointer"
+                      >
+                        <Check className="w-2.5 h-2.5" />
+                      </button>
+                    ) : onlineHud.opponentRelation === 'outgoing' ? (
+                      <span
+                        data-testid="hud-friend-pending"
+                        title={language === 'ru' ? 'Заявка отправлена' : language === 'uz' ? 'So‘rov yuborildi' : 'Request Sent'}
+                        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-500/15 text-amber-400 shrink-0"
+                      >
+                        <Clock className="w-2.5 h-2.5" />
+                      </span>
                     ) : (
-                      onlineHud.onAddOpponentFriend && (
+                      onlineHud.onSendOpponentFriendRequest && (
                         <button
                           type="button"
                           data-testid="hud-add-friend"
@@ -360,7 +390,7 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
                           aria-label={t.addFriendBtn}
                           onClick={(e) => {
                             e.stopPropagation();
-                            onlineHud.onAddOpponentFriend?.();
+                            onlineHud.onSendOpponentFriendRequest?.();
                           }}
                           className={`inline-flex items-center justify-center w-4 h-4 rounded-full border transition-colors shrink-0 cursor-pointer ${
                             isSurv
@@ -600,6 +630,32 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
             <Eye className="w-4 h-4" />
             <span>{tacticalCam ? t.idleCam : t.tacticalCam}</span>
           </button>
+
+          {onCycleMusicTrack && (
+            <button
+              type="button"
+              tabIndex={-1}
+              data-testid="hud-music-next-btn"
+              data-music-track={musicTrackPreference}
+              aria-label={`${getMusicTrackLabel(musicTrackPreference, language)} — ${
+                language === 'ru' ? 'Следующий трек' : language === 'uz' ? 'Keyingi trek' : 'Next track'
+              }`}
+              title={`${getMusicTrackLabel(musicTrackPreference, language)} (${
+                language === 'ru' ? 'клик — следующий трек' : language === 'uz' ? 'keyingi trek' : 'click for next track'
+              })`}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onCycleMusicTrack();
+              }}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${btnMuted}`}
+            >
+              <Music className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="hidden lg:inline max-w-[116px] truncate">
+                {getMusicTrackLabel(musicTrackPreference, language)}
+              </span>
+              <SkipForward className="w-3 h-3 opacity-75 shrink-0" />
+            </button>
+          )}
 
           <button
             type="button"

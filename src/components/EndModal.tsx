@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check, Crown, Lock, UserPlus } from 'lucide-react';
+import { Check, Clock, Crown, Lock, UserPlus } from 'lucide-react';
 import { MatchScoreBreakdown } from '../core/achievements';
 import { DialogueAudioMode, GameMode, GraphicsQuality } from '../core/deck/cardData';
 import { Language, formatMatchTime, getTranslations } from '../core/localization';
@@ -9,6 +9,7 @@ import {
   SeatRole,
   formatThinkTimeMs,
 } from '../core/onlineClient';
+import { OpponentRelationStatus } from '../core/socialClient';
 import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
 
 interface EndModalProps {
@@ -24,8 +25,9 @@ interface EndModalProps {
   scoreBreakdown?: MatchScoreBreakdown | null;
   onlineSummary?: OnlineMatchEndSummary | null;
   onlineYourSeat?: SeatRole;
-  onlineOpponentIsFriend?: boolean;
-  onAddOnlineFriend?: (friendCode: string, nickname: string, avatarId: string) => void;
+  onlineOpponentRelation?: OpponentRelationStatus;
+  onSendOnlineFriendRequest?: (friendCode: string, nickname: string, avatarId: string) => void;
+  onAcceptOnlineFriendRequest?: (friendCode: string) => void;
   onlineRematchRequestedByMe?: boolean;
   onlineRematchRequestedByOpp?: boolean;
   onRequestRematch?: () => void;
@@ -66,8 +68,9 @@ export const EndModal: React.FC<EndModalProps> = ({
   scoreBreakdown,
   onlineSummary,
   onlineYourSeat,
-  onlineOpponentIsFriend,
-  onAddOnlineFriend,
+  onlineOpponentRelation = 'none',
+  onSendOnlineFriendRequest,
+  onAcceptOnlineFriendRequest,
   onlineRematchRequestedByMe,
   onlineRematchRequestedByOpp,
   onRequestRematch,
@@ -473,7 +476,7 @@ export const EndModal: React.FC<EndModalProps> = ({
                     </div>
                     {!isMe && p.friendCode && (
                       <div className="pt-1.5 border-t border-stone-500/20">
-                        {onlineOpponentIsFriend ? (
+                        {onlineOpponentRelation === 'friend' ? (
                           <span
                             data-testid="end-friend-badge"
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-500/15 border border-emerald-500/40 text-emerald-400"
@@ -481,12 +484,46 @@ export const EndModal: React.FC<EndModalProps> = ({
                             <Check className="w-3 h-3" />
                             <span>{t.addedFriendBadge}</span>
                           </span>
+                        ) : onlineOpponentRelation === 'incoming' && onAcceptOnlineFriendRequest ? (
+                          <button
+                            type="button"
+                            data-testid="end-accept-friend"
+                            onClick={() => onAcceptOnlineFriendRequest(p.friendCode!)}
+                            className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>
+                              {language === 'ru'
+                                ? 'Принять заявку'
+                                : language === 'uz'
+                                  ? 'So‘rovni qabul qilish'
+                                  : 'Accept Request'}
+                            </span>
+                          </button>
+                        ) : onlineOpponentRelation === 'outgoing' ? (
+                          <span
+                            data-testid="end-friend-pending"
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
+                              isSurv
+                                ? 'border-stone-700 bg-stone-900 text-stone-400'
+                                : 'border-stone-300 bg-stone-100 text-stone-600'
+                            }`}
+                          >
+                            <Clock className="w-3 h-3" />
+                            <span>
+                              {language === 'ru'
+                                ? 'Заявка отправлена'
+                                : language === 'uz'
+                                  ? 'So‘rov yuborildi'
+                                  : 'Request Sent'}
+                            </span>
+                          </span>
                         ) : (
-                          onAddOnlineFriend && (
+                          onSendOnlineFriendRequest && (
                             <button
                               type="button"
                               data-testid="end-add-friend"
-                              onClick={() => onAddOnlineFriend(p.friendCode!, p.nickname, p.avatarId)}
+                              onClick={() => onSendOnlineFriendRequest(p.friendCode!, p.nickname, p.avatarId)}
                               className={`w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-bold border transition-colors cursor-pointer ${
                                 isSurv
                                   ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 hover:bg-amber-600 hover:text-stone-950'

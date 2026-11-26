@@ -988,6 +988,22 @@ export class ChUnoSceneController {
   private onlineOpponentFillLight: THREE.PointLight | null = null;
   private onlineOpponentAvatarId: AvatarId | null = null;
   private onlineOpponentName: string | null = null;
+  private opponentEmoteReaction: {
+    kind: 'nod' | 'shake' | 'tilt' | 'bounce' | 'bow';
+    elapsed: number;
+    duration: number;
+  } | null = null;
+
+  /**
+   * Subtle additive head micro-reaction when the opponent sends an emote or quick phrase.
+   */
+  public triggerOpponentEmoteReaction(kind: 'nod' | 'shake' | 'tilt' | 'bounce' | 'bow'): void {
+    this.opponentEmoteReaction = {
+      kind,
+      elapsed: 0,
+      duration: 0.65,
+    };
+  }
 
   /**
    * Renders the online opponent's full animated 3D CharacterRigController (`playerAvatar3D.ts`)
@@ -2914,6 +2930,30 @@ export class ChUnoSceneController {
     // Update CharacterRig (breathing, torso lean, 2-bone IK arms, jaw/head speaking animation)
     if (this.opponentRig) {
       this.opponentRig.update(dt, this.elapsedTime, this.speaking);
+
+      // Subtle additive 3D head reaction on incoming opponent emotes (non-conflicting with idle/IK)
+      if (this.opponentEmoteReaction) {
+        const r = this.opponentEmoteReaction;
+        r.elapsed += dt;
+        if (r.elapsed >= r.duration) {
+          this.opponentEmoteReaction = null;
+        } else {
+          const p = r.elapsed / r.duration;
+          const env = Math.sin(p * Math.PI);
+          const head = this.opponentRig.headGroup;
+          if (r.kind === 'nod') {
+            head.rotation.x += Math.sin(p * Math.PI * 2) * 0.14 * env;
+          } else if (r.kind === 'shake') {
+            head.rotation.y += Math.sin(p * Math.PI * 4) * 0.16 * env;
+          } else if (r.kind === 'tilt') {
+            head.rotation.z += 0.18 * env;
+          } else if (r.kind === 'bounce') {
+            head.rotation.x -= Math.abs(Math.sin(p * Math.PI * 2)) * 0.11 * env;
+          } else if (r.kind === 'bow') {
+            head.rotation.x += 0.2 * env;
+          }
+        }
+      }
 
       // Sync carried chess piece with opponent rightHandSocket during Stage 2 (Carry)
       const movingPieceId = this.oppMoveAnim.pieceId;

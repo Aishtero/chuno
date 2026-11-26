@@ -348,10 +348,32 @@ export async function fetchFriendsOnlineRooms(
   return data.rooms && typeof data.rooms === 'object' ? data.rooms : {};
 }
 
+export interface OnlineEmoteEvent {
+  type: 'emote_event';
+  senderRole: SeatRole;
+  emoteId: string;
+  sentAt: number;
+}
+
+export type OnlineSocialNotifyAction =
+  | 'request_sent'
+  | 'request_accepted'
+  | 'request_declined'
+  | 'friend_removed';
+
+export interface OnlineSocialUpdateEvent {
+  type: 'social_update';
+  fromCode: string;
+  action: OnlineSocialNotifyAction;
+  sentAt: number;
+}
+
 export interface OnlineClientCallbacks {
   onStatus?: (status: OnlineConnectionStatus) => void;
   onState?: (state: OnlineRoomView, events?: OnlineMatchEvent[]) => void;
   onMatchEnded?: (summary: OnlineMatchEndSummary, state: OnlineRoomView) => void;
+  onEmote?: (event: OnlineEmoteEvent) => void;
+  onSocialUpdate?: (event: OnlineSocialUpdateEvent) => void;
   onError?: (code: RoomErrorCode | 'CONNECTION_ERROR', message: string) => void;
 }
 
@@ -455,6 +477,8 @@ export class OnlineRoomClient {
           | { type: 'joined'; state: OnlineRoomView }
           | { type: 'room_state'; state: OnlineRoomView; events?: OnlineMatchEvent[] }
           | { type: 'match_ended'; summary: OnlineMatchEndSummary; state: OnlineRoomView }
+          | OnlineEmoteEvent
+          | OnlineSocialUpdateEvent
           | { type: 'error'; code: RoomErrorCode; message: string };
 
         if (msg.type === 'joined') {
@@ -463,6 +487,10 @@ export class OnlineRoomClient {
           this.callbacks.onState?.(msg.state, msg.events);
         } else if (msg.type === 'match_ended') {
           this.callbacks.onMatchEnded?.(msg.summary, msg.state);
+        } else if (msg.type === 'emote_event') {
+          this.callbacks.onEmote?.(msg);
+        } else if (msg.type === 'social_update') {
+          this.callbacks.onSocialUpdate?.(msg);
         } else if (msg.type === 'error') {
           this.callbacks.onError?.(msg.code, msg.message);
         }
@@ -564,6 +592,14 @@ export class OnlineRoomClient {
 
   public requestRematch(): void {
     this.send({ type: 'request_rematch' });
+  }
+
+  public sendEmote(emoteId: string): void {
+    this.send({ type: 'send_emote', emoteId });
+  }
+
+  public notifySocial(action: OnlineSocialNotifyAction): void {
+    this.send({ type: 'social_notify', action });
   }
 
   public disconnect(): void {

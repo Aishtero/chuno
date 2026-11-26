@@ -4,12 +4,14 @@ import {
   Code2,
   Globe,
   HelpCircle,
+  Lock,
   RefreshCw,
   ShieldAlert,
   Sparkles,
   Swords,
   Trophy,
   User,
+  Users,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -29,6 +31,8 @@ interface TitleScreenProps {
   language: Language;
   muted: boolean;
   isTauri: boolean;
+  onlineEnabled: boolean;
+  incomingFriendRequestsCount: number;
   profile: PlayerProfile;
   guestStatus: WebGuestGateStatus;
   hasUpdateAvailable?: boolean;
@@ -43,6 +47,8 @@ interface TitleScreenProps {
   onOpenAudioSettings: () => void;
   onStart: () => void;
   onOpenProfile: () => void;
+  onOpenFriends: () => void;
+  onBlockedOnlineAttempt: () => void;
   onOpenOnlineLobby: (subMode: OnlineSubMode) => void;
   onOpenGuide: () => void;
   onOpenRules: () => void;
@@ -57,6 +63,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
   language,
   muted,
   isTauri,
+  onlineEnabled,
+  incomingFriendRequestsCount,
   profile,
   guestStatus,
   hasUpdateAvailable,
@@ -71,6 +79,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
   onOpenAudioSettings,
   onStart,
   onOpenProfile,
+  onOpenFriends,
+  onBlockedOnlineAttempt,
   onOpenOnlineLobby,
   onOpenGuide,
   onOpenRules,
@@ -100,10 +110,19 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
     fn();
   };
 
+  const desktopOnlyBadgeText = isRu
+    ? 'Только на ПК'
+    : isUz
+      ? 'Faqat PK ilovasida'
+      : 'Desktop App Only';
+
   const handleSelectMenuTab = (tab: MainMenuTab) => {
     soundManager.playClick();
     if (tab === 'online') {
       setOnlineTabActive(true);
+      if (!onlineEnabled) {
+        onBlockedOnlineAttempt();
+      }
       return;
     }
     setOnlineTabActive(false);
@@ -202,6 +221,34 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
             <span className="max-w-[110px] truncate" data-testid="title-player-nickname">
               {profile.nickname || profile.displayName}
             </span>
+          </button>
+
+          {/* Prominent Friends Button with red incoming requests badge (or lock icon in Web prod) */}
+          <button
+            type="button"
+            data-testid="open-friends-btn"
+            onClick={() => clickThen(onlineEnabled ? onOpenFriends : onBlockedOnlineAttempt)}
+            className={`relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold tracking-wide transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              isSurv
+                ? 'border-stone-700/90 bg-stone-950/80 text-stone-100 hover:border-amber-400 hover:text-amber-200'
+                : 'border-[#2e4738]/30 bg-white/85 text-[#1b241e] hover:border-[#2e4738]/70 hover:bg-white'
+            }`}
+            title={onlineEnabled ? t.friendsTab : desktopOnlyBadgeText}
+          >
+            <Users className="w-3.5 h-3.5 opacity-85" aria-hidden="true" />
+            <span>{t.friendsTab}</span>
+            {!onlineEnabled ? (
+              <Lock className="w-3 h-3 opacity-70" aria-hidden="true" />
+            ) : (
+              incomingFriendRequestsCount > 0 && (
+                <span
+                  data-testid="friends-incoming-badge"
+                  className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white font-mono-num text-[10px] font-bold shadow-sm"
+                >
+                  {incomingFriendRequestsCount}
+                </span>
+              )
+            )}
           </button>
 
           {/* Single merged Leaderboard (+ Achievements) button */}
@@ -372,6 +419,19 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
           >
             <Globe className="w-3.5 h-3.5 opacity-80" aria-hidden="true" />
             <span>{t.modeOnline}</span>
+            {!onlineEnabled && (
+              <span
+                data-testid="online-tab-lock-badge"
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  isSurv
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'bg-amber-100 text-amber-900 border border-amber-300'
+                }`}
+              >
+                <Lock className="w-2.5 h-2.5" aria-hidden="true" />
+                <span className="hidden sm:inline">{desktopOnlyBadgeText}</span>
+              </span>
+            )}
           </button>
         </div>
 
@@ -385,16 +445,37 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
               <button
                 type="button"
                 data-online-card="online_friendly"
-                onClick={() => clickThen(() => onOpenOnlineLobby('online_friendly'))}
+                onClick={() =>
+                  clickThen(() =>
+                    onlineEnabled
+                      ? onOpenOnlineLobby('online_friendly')
+                      : onBlockedOnlineAttempt(),
+                  )
+                }
                 className={`group text-left p-3.5 rounded-lg border transition-all cursor-pointer ${
                   isSurv
                     ? 'border-stone-700/90 bg-stone-950/80 hover:border-emerald-500/70 hover:bg-stone-900'
                     : 'border-[#2e4738]/25 bg-white/85 hover:border-[#2e4738] hover:bg-white shadow-sm'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Swords className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="text-sm font-bold">{t.onlineFriendlyTitle}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Swords className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="text-sm font-bold truncate">{t.onlineFriendlyTitle}</span>
+                  </div>
+                  {!onlineEnabled && (
+                    <span
+                      data-testid="online-card-lock-badge"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                        isSurv
+                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/35'
+                          : 'bg-amber-100 text-amber-900 border border-amber-300'
+                      }`}
+                    >
+                      <Lock className="w-2.5 h-2.5" aria-hidden="true" />
+                      <span>{desktopOnlyBadgeText}</span>
+                    </span>
+                  )}
                 </div>
                 <p className={`mt-1 text-xs leading-snug ${isSurv ? 'text-stone-400' : 'text-stone-600'}`}>
                   {t.onlineFriendlyDesc}
@@ -404,16 +485,36 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
               <button
                 type="button"
                 data-online-card="online_survival"
-                onClick={() => clickThen(() => onOpenOnlineLobby('online_survival'))}
+                onClick={() =>
+                  clickThen(() =>
+                    onlineEnabled
+                      ? onOpenOnlineLobby('online_survival')
+                      : onBlockedOnlineAttempt(),
+                  )
+                }
                 className={`group text-left p-3.5 rounded-lg border transition-all cursor-pointer ${
                   isSurv
                     ? 'border-stone-700/90 bg-stone-950/80 hover:border-red-500/70 hover:bg-stone-900'
                     : 'border-[#8B1E1E]/25 bg-white/85 hover:border-[#8B1E1E] hover:bg-white shadow-sm'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-red-600 shrink-0" />
-                  <span className="text-sm font-bold">{t.onlineSurvivalTitle}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ShieldAlert className="w-4 h-4 text-red-600 shrink-0" />
+                    <span className="text-sm font-bold truncate">{t.onlineSurvivalTitle}</span>
+                  </div>
+                  {!onlineEnabled && (
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                        isSurv
+                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/35'
+                          : 'bg-amber-100 text-amber-900 border border-amber-300'
+                      }`}
+                    >
+                      <Lock className="w-2.5 h-2.5" aria-hidden="true" />
+                      <span>{desktopOnlyBadgeText}</span>
+                    </span>
+                  )}
                 </div>
                 <p className={`mt-1 text-xs leading-snug ${isSurv ? 'text-stone-400' : 'text-stone-600'}`}>
                   {t.onlineSurvivalDesc}

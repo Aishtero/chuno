@@ -1066,7 +1066,7 @@ test('mergeProfiles, exportProfileToJson, and parseAndValidateImportedProfile pr
 
 test('v0.2.3 profile migration preserves v0.2.2 achievements, stats, and settings without reset', async () => {
   const { normalizeAndMigrateProfile, mergeProfiles, APP_VERSION, getPrivacyPolicyUrl } = await import('./profileManager');
-  assert.equal(APP_VERSION, '0.3.0');
+  assert.equal(APP_VERSION, '0.4.0');
 
   const v022Profile = {
     schemaVersion: 2,
@@ -1202,8 +1202,8 @@ test('v0.2.3 webGuestGate resets cleanly on version bump from 0.2.2 and stays di
   recordWebGuestMatchCompleted({ appVersion: '0.2.2', storage, isTauri: false });
   assert.equal(getWebGuestStatus({ appVersion: '0.2.2', storage, isTauri: false }).isLocked, true);
 
-  // Default APP_VERSION is now 0.3.0 -> fresh 0/3 guest allowance
-  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.3.0');
+  // Default APP_VERSION is now 0.4.0 -> fresh 0/3 guest allowance
+  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.4.0');
   const v023Web = getWebGuestStatus({ storage, isTauri: false });
   assert.equal(v023Web.isGuestMode, true);
   assert.equal(v023Web.matchesPlayed, 0);
@@ -1623,7 +1623,261 @@ test('Online HUD & CRT monitor never show Dealer for real opponent, and public r
   assert.equal(formatPublicRoomModeBadge({ mode: 'survival', startingHp: 2 }, 'en'), 'Survival · 2 HP');
   assert.equal(formatPublicRoomModeBadge({ mode: 'survival', startingHp: 2 }, 'ru'), 'Выживание · 2 HP');
   assert.equal(formatPublicRoomModeBadge({ mode: 'survival', startingHp: 1 }, 'uz'), 'Omon qolish · 1 HP');
+});
 
-  const { PROD_MP_SERVER_URL } = await import('./onlineClient');
-  assert.equal(PROD_MP_SERVER_URL, 'wss://chuno-mp-server.kizaru0260.workers.dev');
+test('Emotes registry: 10 animated WebP assets on disk, 6 localized quick phrases, cooldown math, and opponent Mute filter', async () => {
+  const { existsSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const {
+    ANIMATED_EMOTES,
+    QUICK_PHRASES,
+    ALL_EMOTES,
+    CLIENT_EMOTE_COOLDOWN_MS,
+    isValidEmoteId,
+    getEmoteLabel,
+    canSendEmote,
+    getEmoteCooldownRatio,
+    shouldShowIncomingEmote,
+    getEmoteUiCopy,
+  } = await import('../data/emotes');
+
+  assert.equal(ANIMATED_EMOTES.length, 10);
+  assert.equal(QUICK_PHRASES.length, 6);
+  assert.equal(ALL_EMOTES.length, 16);
+
+  // Every animated emote has unique ID, localized EN/RU/UZ labels, and an existing WebP asset in public/emotes/
+  const ids = new Set<string>();
+  for (const em of ANIMATED_EMOTES) {
+    assert.equal(ids.has(em.id), false, `Duplicate emote ID: ${em.id}`);
+    ids.add(em.id);
+    assert.equal(isValidEmoteId(em.id), true);
+    assert.ok(getEmoteLabel(em.id, 'en').length > 0);
+    assert.ok(getEmoteLabel(em.id, 'ru').length > 0);
+    assert.ok(getEmoteLabel(em.id, 'uz').length > 0);
+    const rel = em.src.replace(/^\.\//, '');
+    assert.equal(
+      existsSync(resolve(process.cwd(), 'public', rel)),
+      true,
+      `Missing animated WebP asset: public/${rel}`,
+    );
+  }
+
+  for (const ph of QUICK_PHRASES) {
+    assert.equal(isValidEmoteId(ph.id), true);
+    assert.ok(getEmoteLabel(ph.id, 'en').length > 0);
+    assert.ok(getEmoteLabel(ph.id, 'ru').length > 0);
+    assert.ok(getEmoteLabel(ph.id, 'uz').length > 0);
+  }
+  assert.equal(isValidEmoteId('invalid_emote'), false);
+
+  // Client 2.5s cooldown & smooth ratio progression
+  assert.equal(canSendEmote(0, 10_000), true);
+  assert.equal(canSendEmote(10_000, 11_000), false);
+  assert.equal(canSendEmote(10_000, 10_000 + CLIENT_EMOTE_COOLDOWN_MS), true);
+  assert.equal(getEmoteCooldownRatio(10_000, 10_000), 1);
+  assert.ok(Math.abs(getEmoteCooldownRatio(10_000, 10_000 + CLIENT_EMOTE_COOLDOWN_MS / 2) - 0.5) < 0.01);
+  assert.equal(getEmoteCooldownRatio(10_000, 10_000 + CLIENT_EMOTE_COOLDOWN_MS), 0);
+
+  // Mute opponent emotes hides incoming opponent emotes while keeping player's own emotes visible
+  assert.equal(shouldShowIncomingEmote('opponent', false), true);
+  assert.equal(shouldShowIncomingEmote('opponent', true), false);
+  assert.equal(shouldShowIncomingEmote('player', true), true);
+
+  // UI copy localized across EN / RU / UZ
+  for (const lang of ['en', 'ru', 'uz'] as const) {
+    const copy = getEmoteUiCopy(lang);
+    assert.ok(copy.buttonTitle.length > 0);
+    assert.ok(copy.muteOpponent.length > 0);
+  }
+});
+
+test('Runtime policy: Tauri always allows online, browser blocks online by default, DEV unlocks only with ?devOnline=1', async () => {
+  const {
+    evaluateOnlineFeaturesEnabled,
+    getDesktopDownloadPageUrl,
+    isDevOnlineQueryActive,
+  } = await import('./runtimePolicy');
+
+  // Tauri desktop ALWAYS enables online (regardless of prod/dev or query params)
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: true, isDev: false, search: '' }), true);
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: true, isDev: true, search: '' }), true);
+
+  // Production Web (!isTauri && !isDev) ALWAYS disables online — even if ?devOnline=1 is passed!
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: false, search: '' }), false);
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: false, search: '?devOnline=1' }), false);
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: false, search: '?room=CH-1234' }), false);
+
+  // Local browser DEV disables online by DEFAULT (matches real web build),
+  // and unlocks ONLY when ?devOnline=1 (or ?devOnline=true) is explicitly passed
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: true, search: '' }), false);
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: true, search: '?room=CH-1234' }), false);
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: true, search: '?devOnline=0' }), false);
+  assert.equal(evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: true, search: '?devOnline=1' }), true);
+  assert.equal(
+    evaluateOnlineFeaturesEnabled({ isTauri: false, isDev: true, search: '?devOnline=1&room=CH-1234' }),
+    true,
+  );
+  assert.equal(isDevOnlineQueryActive('?devOnline=true'), true);
+  assert.equal(isDevOnlineQueryActive('?devOnline=0'), false);
+
+  // Download page URL localization
+  assert.equal(getDesktopDownloadPageUrl('en'), 'https://buro-ecosystem-web.pages.dev/en/chuno');
+  assert.equal(getDesktopDownloadPageUrl('ru'), 'https://buro-ecosystem-web.pages.dev/ru/chuno');
+  assert.equal(getDesktopDownloadPageUrl('uz'), 'https://buro-ecosystem-web.pages.dev/uz/chuno');
+});
+
+test('Social client resolveOpponentRelation distinguishes friend, incoming, outgoing, and none cleanly', async () => {
+  const { resolveOpponentRelation } = await import('./socialClient');
+
+  const snapshot = {
+    friends: [
+      { friendCode: 'CHUNO-FRND-0001', nickname: 'Alice', avatarId: 'strategist', since: 1000 },
+    ],
+    incomingRequests: [
+      {
+        fromCode: 'CHUNO-INCM-0002',
+        fromNickname: 'Bob',
+        fromAvatarId: 'wanderer',
+        toCode: 'CHUNO-SELF-9999',
+        toNickname: 'Me',
+        toAvatarId: 'tactician',
+        createdAt: 2000,
+      },
+    ],
+    outgoingRequests: [
+      {
+        fromCode: 'CHUNO-SELF-9999',
+        fromNickname: 'Me',
+        fromAvatarId: 'tactician',
+        toCode: 'CHUNO-OUTG-0003',
+        toNickname: 'Clara',
+        toAvatarId: 'artist',
+        createdAt: 3000,
+      },
+    ],
+  };
+
+  assert.equal(resolveOpponentRelation('chuno-frnd-0001', snapshot), 'friend');
+  assert.equal(resolveOpponentRelation('CHUNO-INCM-0002', snapshot), 'incoming');
+  assert.equal(resolveOpponentRelation('CHUNO-OUTG-0003', snapshot), 'outgoing');
+  assert.equal(resolveOpponentRelation('CHUNO-NONE-0004', snapshot), 'none');
+  assert.equal(resolveOpponentRelation(null, snapshot), 'none');
+});
+
+test('All 10 animated WebP emotes run at 2x speed (~1.0s cycle, min frame >= 22ms) with valid RIFF/ANIM headers', async () => {
+  const { readFileSync, statSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const { ANIMATED_EMOTES } = await import('../data/emotes');
+
+  for (const em of ANIMATED_EMOTES) {
+    const rel = em.src.replace(/^\.\//, '');
+    const p = resolve(process.cwd(), 'public', rel);
+    const stat = statSync(p);
+    assert.ok(stat.size > 100_000 && stat.size < 1_200_000, `Unexpected size for ${rel}: ${stat.size}`);
+    const buf = readFileSync(p);
+    assert.equal(buf.subarray(0, 4).toString('ascii'), 'RIFF');
+    assert.equal(buf.subarray(8, 12).toString('ascii'), 'WEBP');
+    assert.ok(buf.subarray(0, 64).toString('ascii').includes('ANIM'), `Missing ANIM chunk in ${rel}`);
+
+    // Parse ANMF chunk delays
+    const delays: number[] = [];
+    let pos = 12;
+    while (pos + 8 <= buf.length) {
+      const fourcc = buf.subarray(pos, pos + 4).toString('ascii');
+      const size = buf.readUInt32LE(pos + 4);
+      const start = pos + 8;
+      if (fourcc === 'ANMF' && size >= 16) {
+        const dur = buf[start + 12] | (buf[start + 13] << 8) | (buf[start + 14] << 16);
+        delays.push(dur);
+      }
+      pos = start + size + (size & 1);
+    }
+    const totalMs = delays.reduce((a, b) => a + b, 0);
+    const minDelay = Math.min(...delays);
+    assert.ok(delays.length >= 10, `Too few frames in ${rel}: ${delays.length}`);
+    assert.ok(minDelay >= 22, `Frame delay < 22ms in ${rel}: ${minDelay}ms (browsers clamp <20ms)`);
+    assert.ok(totalMs >= 900 && totalMs <= 1150, `Cycle duration outside ~1.0s in ${rel}: ${totalMs}ms`);
+  }
+});
+
+test('Free music track switcher: Auto vs manual track selection, cycling, and lossless profile persistence', async () => {
+  const {
+    MUSIC_TRACK_CATALOG,
+    MUSIC_PREFERENCE_ORDER,
+    getMusicTrackLabel,
+    getNextMusicTrackPreference,
+    resolveMusicFolderForPreference,
+  } = await import('../audio/musicManager');
+  const { normalizeAndMigrateProfile } = await import('./profileManager');
+
+  assert.equal(MUSIC_TRACK_CATALOG.length, 4);
+  assert.equal(MUSIC_PREFERENCE_ORDER.length, 5);
+
+  // Auto follows mode folder; manual override sticks to selected track folder
+  assert.equal(resolveMusicFolderForPreference('auto', 'friendly_background'), 'friendly_background');
+  assert.equal(resolveMusicFolderForPreference('auto', 'survival'), 'survival');
+  assert.equal(resolveMusicFolderForPreference('midnight', 'friendly_background'), 'unknown');
+  assert.equal(resolveMusicFolderForPreference('iron_girders', 'friendly'), 'survival');
+  assert.equal(resolveMusicFolderForPreference('sunlight', 'survival'), 'friendly');
+  assert.equal(resolveMusicFolderForPreference('meadow', 'survival'), 'friendly_background');
+
+  // Cycling wraps cleanly forward and backward
+  let cur: (typeof MUSIC_PREFERENCE_ORDER)[number] = 'auto';
+  for (let i = 0; i < MUSIC_PREFERENCE_ORDER.length; i++) {
+    cur = getNextMusicTrackPreference(cur, 1);
+  }
+  assert.equal(cur, 'auto');
+  assert.equal(getNextMusicTrackPreference('auto', -1), 'midnight');
+
+  // Localized labels in EN/RU/UZ
+  for (const pref of MUSIC_PREFERENCE_ORDER) {
+    assert.ok(getMusicTrackLabel(pref, 'en').length > 0);
+    assert.ok(getMusicTrackLabel(pref, 'ru').length > 0);
+    assert.ok(getMusicTrackLabel(pref, 'uz').length > 0);
+  }
+
+  // Persists musicTrackPreference cleanly without resetting achievements or friends
+  const { profile } = normalizeAndMigrateProfile({
+    schemaVersion: 4,
+    playerId: 'CHUNO-MUS1-2222',
+    nickname: 'DJKing',
+    score: 2400,
+    unlockedAchievements: { first_win: '2026-11-25T00:00:00Z' },
+    friends: [{ friendCode: 'CHUNO-PAL1-3333', nickname: 'Pal', avatarId: 'artist', addedAt: '2026-11-25T00:00:00Z', matchesTogether: 2 }],
+    settings: {
+      musicTrackPreference: 'midnight',
+      audioDefaultsVersion: 4,
+    },
+  });
+  assert.equal(profile.settings.musicTrackPreference, 'midnight');
+  assert.ok(profile.unlockedAchievements.first_win);
+  assert.equal(profile.friends?.length, 1);
+});
+
+test('Game invite 20s countdown helpers and friend presence sorting work accurately', async () => {
+  const {
+    INVITE_DURATION_MS,
+    getInviteProgressRatio,
+    getInviteRemainingSeconds,
+    sortFriendsByPresence,
+  } = await import('./socialClient');
+
+  assert.equal(INVITE_DURATION_MS, 20_000);
+  const now = 1_000_000;
+  const expiresAt = now + 20_000;
+  assert.equal(getInviteRemainingSeconds(expiresAt, now), 20);
+  assert.equal(getInviteRemainingSeconds(expiresAt, now + 10_000), 10);
+  assert.equal(getInviteRemainingSeconds(expiresAt, now + 20_001), 0);
+  assert.ok(Math.abs(getInviteProgressRatio(expiresAt, now + 5_000) - 0.75) < 0.001);
+  assert.equal(getInviteProgressRatio(expiresAt, now + 25_000), 0);
+
+  const sorted = sortFriendsByPresence([
+    { friendCode: 'CHUNO-OFF1-0001', nickname: 'Off', avatarId: 'strategist', since: 300, presenceStatus: 'offline' },
+    { friendCode: 'CHUNO-BSY1-0002', nickname: 'Busy', avatarId: 'strategist', since: 200, presenceStatus: 'in_match' },
+    { friendCode: 'CHUNO-ONL1-0003', nickname: 'Online', avatarId: 'strategist', since: 100, presenceStatus: 'online' },
+  ]);
+  assert.deepEqual(
+    sorted.map((f) => f.friendCode),
+    ['CHUNO-ONL1-0003', 'CHUNO-BSY1-0002', 'CHUNO-OFF1-0001'],
+  );
 });

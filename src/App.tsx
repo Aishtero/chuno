@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  MusicTrackPreference,
+  getNextMusicTrackPreference,
+} from './audio/musicManager';
 import { soundManager } from './audio/soundManager';
 import { AchievementToast } from './components/AchievementToast';
 import { AudioSettingsModal } from './components/AudioSettingsModal';
+import { DesktopOnlyModal } from './components/DesktopOnlyModal';
+import { ActiveEmoteInstance, EmoteBubbleOverlay } from './components/EmoteBubbleOverlay';
+import { EmotePicker } from './components/EmotePicker';
 import { EndModal } from './components/EndModal';
+import { FriendsModal, FriendsModalTab } from './components/FriendsModal';
 import { GameHud, OnlineHudInfo } from './components/GameHud';
+import { GameInviteBanner } from './components/GameInviteBanner';
 import { GodotModal } from './components/GodotModal';
 import { LeaderDashboardModal, LeaderModalTab } from './components/LeaderDashboardModal';
 import { OnlineLobbyModal } from './components/OnlineLobbyModal';
@@ -15,11 +24,11 @@ import { VisualGuideModal } from './components/VisualGuideModal';
 import { WebGuestModal } from './components/WebGuestModal';
 import { AchievementDefinition, MatchScoreBreakdown } from './core/achievements';
 import { BoardState } from './core/chess/boardState';
-import { copyTextToClipboard } from './core/clipboard';
 import { OnlineSubMode } from './core/menuNavigation';
 import { resolveOnlineAutoCamera } from './core/onlineCamera';
 import {
   OnlineConnectionStatus,
+  OnlineEmoteEvent,
   OnlineMatchEndSummary,
   OnlineMatchEvent,
   OnlineMode,
@@ -28,11 +37,35 @@ import {
   RoomErrorCode,
   RoomVisibility,
   StartingHp,
-  buildRoomInviteUrl,
   createOnlineRoom,
   parseRoomCodeFromSearch,
   requestQuickMatch,
 } from './core/onlineClient';
+import { isOnlineFeaturesEnabled } from './core/runtimePolicy';
+import {
+  EMPTY_SOCIAL_STATE,
+  GameInviteItem,
+  SocialErrorCode,
+  SocialInviteErrorCode,
+  SocialPresenceClient,
+  SocialStateSnapshot,
+  cancelFriendRequest,
+  removeSocialFriend,
+  resolveOpponentRelation,
+  respondFriendRequest,
+  sendFriendRequest,
+  sortFriendsByPresence,
+  syncSocialState,
+} from './core/socialClient';
+import { preloadAllEmoteBlobs } from './core/emoteAssets';
+import {
+  CLIENT_EMOTE_COOLDOWN_MS,
+  EmoteId,
+  canSendEmote,
+  getEmoteDefinition,
+  isValidEmoteId,
+  shouldShowIncomingEmote,
+} from './data/emotes';
 import {
   computeUpdateIndicatorState,
   shouldRunBackgroundUpdateCheck,
@@ -76,15 +109,12 @@ import {
 } from './core/match/matchEngine';
 import {
   PlayerProfile,
-  addFriend,
   exportProfileToJson,
   hydrateProfileFromTauriDisk,
-  isFriend,
   isTauriRuntime,
   loadProfile,
   parseAndValidateImportedProfile,
   recordMatchOutcomeDetailed,
-  removeFriend,
   saveProfile,
   syncFriendMatchPresence,
   validateNickname,
@@ -146,6 +176,7 @@ export default function App() {
     soundManager.setMusicVolume(p.settings.musicVolume);
     soundManager.setSfxVolume(p.settings.sfxVolume);
     soundManager.setVoiceVolume(p.settings.voiceVolume);
+    soundManager.setMusicTrackPreference(p.settings.musicTrackPreference ?? 'auto');
     return p;
   });
 
@@ -168,6 +199,20 @@ export default function App() {
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState<LeaderModalTab | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showFriendsModal, setShowFriendsModal] = useState<{
+    open: boolean;
+    initialTab?: FriendsModalTab;
+  }>({ open: false });
+  const [socialState, setSocialState] = useState<SocialStateSnapshot>(EMPTY_SOCIAL_STATE);
+  const [socialLoading, setSocialLoading] = useState(false);
+  const [incomingInvite, setIncomingInvite] = useState<GameInviteItem | null>(null);
+  const [outgoingInvite, setOutgoingInvite] = useState<GameInviteItem | null>(null);
+  const [inviteNotice, setInviteNotice] = useState<{ tone: 'info' | 'err'; text: string } | null>(null);
+  const socialWsRef = useRef<SocialPresenceClient | null>(null);
+  const [desktopOnlyModal, setDesktopOnlyModal] = useState<{
+    open: boolean;
+    inviteRoomCode?: string | null;
+  }>({ open: false, inviteRoomCode: null });
   const [onlineLobbySubMode, setOnlineLobbySubMode] = useState<OnlineSubMode | null>(null);
   const [onlineInitialRoomCode, setOnlineInitialRoomCode] = useState<string | null>(null);
   const [onlineRoomState, setOnlineRoomState] = useState<OnlineRoomView | null>(null);
@@ -183,6 +228,7 @@ export default function App() {
   const [cameraPresetState, setCameraPresetState] = useState<CameraPreset>('CAM_TITLE');
 
   const isTauri = isTauriRuntime();
+  const onlineEnabled = useMemo(() => isOnlineFeaturesEnabled(), []);
   const [guestStatus, setGuestStatus] = useState<WebGuestGateStatus>(() => getWebGuestStatus());
   const [showGuestModal, setShowGuestModal] = useState<boolean>(() => {
     const st = getWebGuestStatus();
@@ -200,6 +246,15 @@ export default function App() {
   const [tacticalCam, setTacticalCam] = useState(false);
   const [speechText, setSpeechText] = useState<string | null>(null);
   const [endQuote, setEndQuote] = useState<string | null>(null);
+  const [playerEmote, setPlayerEmote] = useState<ActiveEmoteInstance | null>(null);
+  const [opponentEmote, setOpponentEmote] = useState<ActiveEmoteInstance | null>(null);
+  const [emoteLastSentAt, setEmoteLastSentAt] = useState<number>(0);
+  const [opponentEmotesMuted, setOpponentEmotesMuted] = useState<boolean>(false);
+  const opponentEmotesMutedRef = useRef(opponentEmotesMuted);
+  opponentEmotesMutedRef.current = opponentEmotesMuted;
+  const emoteSeqRef = useRef<number>(1);
+  const emoteLastSentAtRef = useRef<number>(0);
+  emoteLastSentAtRef.current = emoteLastSentAt;
   const [hitFlash, setHitFlash] = useState(false);
   const [hitBlackout, setHitBlackout] = useState(false);
   const [lastScoreBreakdown, setLastScoreBreakdown] = useState<MatchScoreBreakdown | null>(null);
@@ -331,6 +386,7 @@ export default function App() {
       soundManager.setMusicVolume(merged.settings.musicVolume);
       soundManager.setSfxVolume(merged.settings.sfxVolume);
       soundManager.setVoiceVolume(merged.settings.voiceVolume);
+      soundManager.setMusicTrackPreference(merged.settings.musicTrackPreference ?? 'auto');
       sceneRef.current?.setGraphicsSettings({
         quality: merged.settings.graphicsQuality,
         showFps: merged.settings.showFps,
@@ -413,6 +469,7 @@ export default function App() {
       soundManager.setMusicVolume(next.settings.musicVolume);
       soundManager.setSfxVolume(next.settings.sfxVolume);
       soundManager.setVoiceVolume(next.settings.voiceVolume);
+      soundManager.setMusicTrackPreference(next.settings.musicTrackPreference ?? 'auto');
       sceneRef.current?.setGraphicsSettings({
         quality: next.settings.graphicsQuality,
         showFps: next.settings.showFps,
@@ -1437,6 +1494,10 @@ export default function App() {
       clearSelection();
       setSpeechText(null);
       setEndQuote(null);
+      setPlayerEmote(null);
+      setOpponentEmote(null);
+      setEmoteLastSentAt(0);
+      setOpponentEmotesMuted(false);
       setHitFlash(false);
       setHitBlackout(false);
       setLastScoreBreakdown(null);
@@ -1506,7 +1567,13 @@ export default function App() {
   // 1 Hz Match Timer using performance.now() delta; pauses on Pause / Modals and stops on Game Over
   useEffect(() => {
     const isTimerRunning =
-      screen === 'playing' && !showRules && !showGodot && !showLeaderboard && !showAudioSettings;
+      screen === 'playing' &&
+      !showRules &&
+      !showGodot &&
+      !showLeaderboard &&
+      !showAudioSettings &&
+      !showFriendsModal.open &&
+      !desktopOnlyModal.open;
     if (!isTimerRunning) return;
 
     matchTimerAnchorRef.current = performance.now();
@@ -1527,7 +1594,15 @@ export default function App() {
         setElapsedSeconds((prev) => (prev === secs ? prev : secs));
       }
     };
-  }, [screen, showRules, showGodot, showLeaderboard, showAudioSettings]);
+  }, [
+    screen,
+    showRules,
+    showGodot,
+    showLeaderboard,
+    showAudioSettings,
+    showFriendsModal.open,
+    desktopOnlyModal.open,
+  ]);
 
   // Keep 3D tabletop clocks (Survival CRT console & Light wooden chess clock) strictly synced at 1 Hz
   useEffect(() => {
@@ -1758,6 +1833,35 @@ export default function App() {
       const next: PlayerProfile = {
         ...prev,
         settings: { ...prev.settings, gameMusicEnabled: enabled },
+      };
+      saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  const handleChangeMusicTrackPreference = useCallback((pref: MusicTrackPreference) => {
+    soundManager.setMusicTrackPreference(pref);
+    setProfile((prev) => {
+      const next: PlayerProfile = {
+        ...prev,
+        settings: { ...prev.settings, musicTrackPreference: pref },
+      };
+      saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  const handleCycleMusicTrack = useCallback(() => {
+    soundManager.playClick();
+    setProfile((prev) => {
+      const nextPref = getNextMusicTrackPreference(
+        prev.settings.musicTrackPreference ?? 'auto',
+        1,
+      );
+      soundManager.setMusicTrackPreference(nextPref);
+      const next: PlayerProfile = {
+        ...prev,
+        settings: { ...prev.settings, musicTrackPreference: nextPref },
       };
       saveProfile(next);
       return next;
@@ -2042,17 +2146,315 @@ export default function App() {
     [setCamera],
   );
 
+  // Preload all 10 animated WebP emote blobs when entering a match for zero-latency frame-1 playback
+  useEffect(() => {
+    if (screen === 'playing') {
+      void preloadAllEmoteBlobs();
+    }
+  }, [screen]);
+
+  const handleClearPlayerEmote = useCallback((instanceId: number) => {
+    setPlayerEmote((cur) => (cur && cur.instanceId === instanceId ? null : cur));
+  }, []);
+
+  const handleClearOpponentEmote = useCallback((instanceId: number) => {
+    setOpponentEmote((cur) => (cur && cur.instanceId === instanceId ? null : cur));
+  }, []);
+
+  const handleToggleMuteOpponentEmotes = useCallback(() => {
+    setOpponentEmotesMuted((prev) => {
+      const next = !prev;
+      if (next) {
+        setOpponentEmote(null);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSendEmote = useCallback(
+    (emoteId: EmoteId) => {
+      const now = Date.now();
+      if (!canSendEmote(emoteLastSentAtRef.current, now, CLIENT_EMOTE_COOLDOWN_MS)) {
+        return;
+      }
+      const def = getEmoteDefinition(emoteId);
+      if (!def) return;
+
+      emoteLastSentAtRef.current = now;
+      setEmoteLastSentAt(now);
+
+      const instanceId = emoteSeqRef.current++;
+      setPlayerEmote({
+        instanceId,
+        emoteId,
+        senderSide: 'player',
+        senderName: profile.nickname || profile.displayName,
+        sentAt: now,
+      });
+      soundManager.playEmoteSfx(def.sfx);
+
+      if (onlineMatchActiveRef.current && onlineRoomStateRef.current) {
+        onlineClientRef.current?.sendEmote(emoteId);
+      }
+    },
+    [profile.displayName, profile.nickname],
+  );
+
+  const handleReceiveOnlineEmote = useCallback((event: OnlineEmoteEvent) => {
+    const room = onlineRoomStateRef.current;
+    if (!room) return;
+    if (!isValidEmoteId(event.emoteId)) return;
+    const senderSide: 'player' | 'opponent' =
+      event.senderRole === room.yourSeat ? 'player' : 'opponent';
+
+    // Local sender already rendered immediately with 0ms latency
+    if (senderSide === 'player') return;
+    if (!shouldShowIncomingEmote('opponent', opponentEmotesMutedRef.current)) {
+      return;
+    }
+
+    const def = getEmoteDefinition(event.emoteId);
+    if (!def) return;
+
+    const oppSlot = room.players[event.senderRole];
+    const instanceId = emoteSeqRef.current++;
+    setOpponentEmote({
+      instanceId,
+      emoteId: event.emoteId,
+      senderSide: 'opponent',
+      senderName: oppSlot?.nickname,
+      sentAt: event.sentAt,
+    });
+    soundManager.playEmoteSfx(def.sfx);
+    sceneRef.current?.triggerOpponentEmoteReaction(def.avatarReaction);
+  }, []);
+
+  const syncLocalFriendsFromSocial = useCallback((nextSocial: SocialStateSnapshot) => {
+    setProfile((prev) => {
+      const existingByCode = new Map(
+        (prev.friends ?? []).map((f) => [f.friendCode.toUpperCase(), f]),
+      );
+      const nextFriends = nextSocial.friends.map((sf) => {
+        const key = sf.friendCode.toUpperCase();
+        const existing = existingByCode.get(key);
+        const safeAvatar: AvatarId = isValidAvatarId(sf.avatarId)
+          ? sf.avatarId
+          : (existing?.avatarId ?? 'strategist');
+        return {
+          friendCode: key,
+          nickname: sf.nickname,
+          avatarId: safeAvatar,
+          addedAt: existing?.addedAt ?? new Date(sf.since || Date.now()).toISOString(),
+          matchesTogether: existing?.matchesTogether ?? 0,
+        };
+      });
+      const prevFriends = prev.friends ?? [];
+      if (
+        prevFriends.length === nextFriends.length &&
+        prevFriends.every(
+          (pf, idx) =>
+            pf.friendCode === nextFriends[idx].friendCode &&
+            pf.nickname === nextFriends[idx].nickname &&
+            pf.avatarId === nextFriends[idx].avatarId,
+        )
+      ) {
+        return prev;
+      }
+      const updated: PlayerProfile = { ...prev, friends: nextFriends };
+      saveProfile(updated);
+      return updated;
+    });
+  }, []);
+
+  const refreshSocialState = useCallback(async () => {
+    if (!onlineEnabled) return;
+    setSocialLoading(true);
+    try {
+      const snap = await syncSocialState({
+        friendCode: profile.playerId,
+        nickname: profile.nickname || profile.displayName,
+        avatarId: profile.avatarId,
+      });
+      setSocialState(snap);
+      syncLocalFriendsFromSocial(snap);
+    } catch {
+      // Server offline — keep existing cached state
+    } finally {
+      setSocialLoading(false);
+    }
+  }, [
+    onlineEnabled,
+    profile.avatarId,
+    profile.displayName,
+    profile.nickname,
+    profile.playerId,
+    syncLocalFriendsFromSocial,
+  ]);
+
+  const refreshSocialStateRef = useRef(refreshSocialState);
+  refreshSocialStateRef.current = refreshSocialState;
+
+  const handleJoinOnlineRoomRef = useRef<(roomCode: string) => void>(() => {});
+  const syncLocalFriendsFromSocialRef = useRef(syncLocalFriendsFromSocial);
+  syncLocalFriendsFromSocialRef.current = syncLocalFriendsFromSocial;
+
+  // Persistent lightweight WebSocket `/ws/social/:friendCode` for online presence & 20s instant game invites.
+  // STRICTLY gated by `onlineEnabled` — 0 WS connections on default web / production web!
+  useEffect(() => {
+    if (!onlineEnabled) {
+      socialWsRef.current?.disconnect();
+      socialWsRef.current = null;
+      return;
+    }
+
+    const client = new SocialPresenceClient({
+      onSocialState: (snap) => {
+        setSocialState(snap);
+        syncLocalFriendsFromSocialRef.current(snap);
+      },
+      onFriendPresence: (friendCode, isOnline, presenceStatus) => {
+        setSocialState((prev) => {
+          const nextFriends = sortFriendsByPresence(
+            prev.friends.map((f) =>
+              f.friendCode === friendCode ? { ...f, isOnline, presenceStatus } : f,
+            ),
+          );
+          return { ...prev, friends: nextFriends };
+        });
+      },
+      onInviteSent: (invite) => {
+        setOutgoingInvite(invite);
+        setInviteNotice(null);
+      },
+      onInviteIncoming: (invite) => {
+        setIncomingInvite(invite);
+        soundManager.playInviteChime();
+      },
+      onInviteAccepted: (payload) => {
+        setIncomingInvite(null);
+        setOutgoingInvite(null);
+        setInviteNotice(null);
+        setShowFriendsModal({ open: false });
+        setShowLeaderboard(null);
+        setShowProfile(false);
+        setShowRules(false);
+        setOnlineLobbySubMode(null);
+        setOnlineInitialRoomCode(payload.roomCode);
+        handleJoinOnlineRoomRef.current(payload.roomCode);
+      },
+      onInviteDeclined: ({ inviteId, targetNickname }) => {
+        setOutgoingInvite((cur) => (cur?.inviteId === inviteId ? null : cur));
+        const lang = languageRef.current;
+        const text =
+          lang === 'ru'
+            ? `${targetNickname}: сейчас не может / друг отказался`
+            : lang === 'uz'
+              ? `${targetNickname}: hozir o‘ynay olmaydi / do‘st rad etdi`
+              : `${targetNickname}: can't play right now / friend declined`;
+        setInviteNotice({ tone: 'err', text });
+      },
+      onInviteExpired: ({ inviteId, fromCode, reason }) => {
+        setIncomingInvite((cur) => (cur?.inviteId === inviteId ? null : cur));
+        setOutgoingInvite((cur) => (cur?.inviteId === inviteId ? null : cur));
+        if (reason === 'expired' && fromCode === profile.playerId) {
+          const lang = languageRef.current;
+          const text =
+            lang === 'ru'
+              ? 'Друг не ответил (20с)'
+              : lang === 'uz'
+                ? 'Do‘st javob bermadi (20s)'
+                : 'Friend did not respond (20s)';
+          setInviteNotice({ tone: 'info', text });
+        }
+      },
+      onInviteError: (code: SocialInviteErrorCode) => {
+        setOutgoingInvite(null);
+        const lang = languageRef.current;
+        let text =
+          lang === 'ru'
+            ? 'Не удалось отправить приглашение.'
+            : lang === 'uz'
+              ? 'Taklif yuborib bo‘lmadi.'
+              : 'Could not send invite.';
+        if (code === 'FRIEND_OFFLINE') {
+          text =
+            lang === 'ru'
+              ? 'Друг сейчас не в сети.'
+              : lang === 'uz'
+                ? 'Do‘stingiz hozir oflayn.'
+                : 'Friend is currently offline.';
+        } else if (code === 'FRIEND_BUSY') {
+          text =
+            lang === 'ru'
+              ? 'Друг сейчас уже играет партию.'
+              : lang === 'uz'
+                ? 'Do‘stingiz hozir o‘yinda.'
+                : 'Friend is currently in a match.';
+        }
+        setInviteNotice({ tone: 'err', text });
+      },
+    });
+
+    socialWsRef.current = client;
+    client.connect({
+      friendCode: profile.playerId,
+      nickname: profile.nickname || profile.displayName,
+      avatarId: profile.avatarId,
+      status: screenRef.current === 'playing' ? 'in_match' : 'online',
+    });
+
+    return () => {
+      client.disconnect();
+      if (socialWsRef.current === client) {
+        socialWsRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlineEnabled, profile.playerId]);
+
+  // Keep presence status (`online` vs `in_match`) & nickname/avatar live on the social socket
+  useEffect(() => {
+    if (!onlineEnabled || !socialWsRef.current) return;
+    const status: 'online' | 'in_match' = screen === 'playing' ? 'in_match' : 'online';
+    socialWsRef.current.updateHello(
+      profile.nickname || profile.displayName,
+      profile.avatarId,
+      status,
+    );
+  }, [onlineEnabled, screen, profile.nickname, profile.displayName, profile.avatarId]);
+
+  // Sync confirmed friends & incoming/outgoing requests ONLY when online features are enabled (0 server calls when locked)
+  useEffect(() => {
+    if (!onlineEnabled) return;
+    void refreshSocialState();
+    const shouldPoll =
+      screen === 'title' || showFriendsModal.open || onlineLobbySubMode !== null;
+    if (!shouldPoll) return;
+    const id = window.setInterval(() => {
+      void refreshSocialState();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [onlineEnabled, screen, showFriendsModal.open, onlineLobbySubMode, refreshSocialState]);
+
   const ensureOnlineClient = useCallback(() => {
     if (!onlineClientRef.current) {
       onlineClientRef.current = new OnlineRoomClient({
         onStatus: (st) => setOnlineConnectionStatus(st),
         onState: (state, events) => applyOnlineRoomState(state, events),
         onMatchEnded: (summary, state) => applyOnlineRoomState(state, undefined, summary),
+        onEmote: (ev) => handleReceiveOnlineEmote(ev),
+        onSocialUpdate: () => {
+          void refreshSocialStateRef.current();
+        },
         onError: (code) => setOnlineErrorCode(code),
       });
     }
     return onlineClientRef.current;
-  }, [applyOnlineRoomState]);
+  }, [applyOnlineRoomState, handleReceiveOnlineEmote]);
+
+  const handleOpenBlockedOnline = useCallback((inviteRoomCode?: string | null) => {
+    setDesktopOnlyModal({ open: true, inviteRoomCode: inviteRoomCode ?? null });
+  }, []);
 
   const handleLeaveOnlineRoom = useCallback(() => {
     if (onlineCameraTimerRef.current !== null) {
@@ -2065,6 +2467,9 @@ export default function App() {
     setOnlineEndSummary(null);
     setOnlineErrorCode(null);
     setOnlineInitialRoomCode(null);
+    setPlayerEmote(null);
+    setOpponentEmote(null);
+    setOpponentEmotesMuted(false);
     sceneRef.current?.setOnlineOpponentAvatar(null);
   }, []);
 
@@ -2074,6 +2479,10 @@ export default function App() {
       startingHp: StartingHp,
       visibility: RoomVisibility = 'public',
     ) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline();
+        return null;
+      }
       setOnlineErrorCode(null);
       setOnlineConnectionStatus('connecting');
       const nick = profile.nickname || profile.displayName;
@@ -2101,11 +2510,23 @@ export default function App() {
         return null;
       }
     },
-    [ensureOnlineClient, profile.avatarId, profile.displayName, profile.nickname, profile.playerId],
+    [
+      ensureOnlineClient,
+      handleOpenBlockedOnline,
+      onlineEnabled,
+      profile.avatarId,
+      profile.displayName,
+      profile.nickname,
+      profile.playerId,
+    ],
   );
 
   const handleQuickMatch = useCallback(
     async (onlineMode: OnlineMode, startingHp?: StartingHp) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline();
+        return;
+      }
       setOnlineErrorCode(null);
       setOnlineConnectionStatus('connecting');
       const nick = profile.nickname || profile.displayName;
@@ -2132,11 +2553,23 @@ export default function App() {
         setOnlineErrorCode('CONNECTION_ERROR');
       }
     },
-    [ensureOnlineClient, profile.avatarId, profile.displayName, profile.nickname, profile.playerId],
+    [
+      ensureOnlineClient,
+      handleOpenBlockedOnline,
+      onlineEnabled,
+      profile.avatarId,
+      profile.displayName,
+      profile.nickname,
+      profile.playerId,
+    ],
   );
 
   const handleJoinOnlineRoom = useCallback(
     (roomCode: string) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline(roomCode);
+        return;
+      }
       setOnlineErrorCode(null);
       const client = ensureOnlineClient();
       client.connect({
@@ -2146,70 +2579,173 @@ export default function App() {
         friendCode: profile.playerId,
       });
     },
-    [ensureOnlineClient, profile.avatarId, profile.displayName, profile.nickname, profile.playerId],
+    [
+      ensureOnlineClient,
+      handleOpenBlockedOnline,
+      onlineEnabled,
+      profile.avatarId,
+      profile.displayName,
+      profile.nickname,
+      profile.playerId,
+    ],
   );
+  handleJoinOnlineRoomRef.current = handleJoinOnlineRoom;
 
-  const handleAddFriend = useCallback(
-    (friendCode: string, nickname?: string, avatarId?: string) => {
-      let outcome:
-        | { ok: true; alreadyExists: boolean }
-        | { ok: false; error: 'invalid_code' | 'self' } = { ok: false, error: 'invalid_code' };
-      setProfile((prev) => {
-        const res = addFriend(prev, { friendCode, nickname, avatarId });
-        if (!res.ok) {
-          outcome = { ok: false, error: res.error };
-          return prev;
-        }
-        outcome = { ok: true, alreadyExists: res.alreadyExists };
-        saveProfile(res.profile);
-        return res.profile;
+  const handleSendFriendRequest = useCallback(
+    async (
+      toCode: string,
+      toNickname?: string,
+      toAvatarId?: string,
+    ): Promise<
+      { ok: true; status: 'sent' | 'auto_accepted' } | { ok: false; error: SocialErrorCode }
+    > => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline();
+        return { ok: false, error: 'SERVER_OFFLINE' };
+      }
+      const res = await sendFriendRequest({
+        fromCode: profile.playerId,
+        fromNickname: profile.nickname || profile.displayName,
+        fromAvatarId: profile.avatarId,
+        toCode,
+        toNickname,
+        toAvatarId,
       });
-      return outcome;
+      if (!res.ok) return res;
+      setSocialState(res.state);
+      syncLocalFriendsFromSocial(res.state);
+      onlineClientRef.current?.notifySocial(
+        res.status === 'auto_accepted' ? 'request_accepted' : 'request_sent',
+      );
+      return { ok: true, status: res.status };
     },
-    [],
+    [
+      handleOpenBlockedOnline,
+      onlineEnabled,
+      profile.avatarId,
+      profile.displayName,
+      profile.nickname,
+      profile.playerId,
+      syncLocalFriendsFromSocial,
+    ],
   );
 
-  const handleRemoveFriend = useCallback((friendCode: string) => {
-    setProfile((prev) => {
-      const next = removeFriend(prev, friendCode);
-      if (next !== prev) saveProfile(next);
-      return next;
-    });
+  const handleRespondFriendRequest = useCallback(
+    async (requesterCode: string, action: 'accept' | 'decline') => {
+      if (!onlineEnabled) return;
+      const res = await respondFriendRequest({
+        friendCode: profile.playerId,
+        requesterCode,
+        action,
+      });
+      if (!res.ok) return;
+      setSocialState(res.state);
+      syncLocalFriendsFromSocial(res.state);
+      onlineClientRef.current?.notifySocial(
+        action === 'accept' ? 'request_accepted' : 'request_declined',
+      );
+    },
+    [onlineEnabled, profile.playerId, syncLocalFriendsFromSocial],
+  );
+
+  const handleCancelFriendRequest = useCallback(
+    async (targetCode: string) => {
+      if (!onlineEnabled) return;
+      const res = await cancelFriendRequest({
+        friendCode: profile.playerId,
+        targetCode,
+      });
+      if (!res.ok) return;
+      setSocialState(res.state);
+    },
+    [onlineEnabled, profile.playerId],
+  );
+
+  const handleRemoveSocialFriend = useCallback(
+    async (targetCode: string) => {
+      if (!onlineEnabled) return;
+      const res = await removeSocialFriend({
+        friendCode: profile.playerId,
+        targetCode,
+      });
+      if (!res.ok) return;
+      setSocialState(res.state);
+      syncLocalFriendsFromSocial(res.state);
+      onlineClientRef.current?.notifySocial('friend_removed');
+    },
+    [onlineEnabled, profile.playerId, syncLocalFriendsFromSocial],
+  );
+
+  const handleSendGameInvite = useCallback(
+    (targetCode: string, onlineMode: OnlineMode, startingHp: StartingHp) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline();
+        return;
+      }
+      setInviteNotice(null);
+      const sent = socialWsRef.current?.sendInvite(targetCode, onlineMode, startingHp);
+      if (!sent) {
+        const lang = languageRef.current;
+        setInviteNotice({
+          tone: 'err',
+          text:
+            lang === 'ru'
+              ? 'Нет связи с сервером мультиплеера.'
+              : lang === 'uz'
+                ? 'Multiplayer serveri bilan aloqa yo‘q.'
+                : 'Not connected to multiplayer server.',
+        });
+      }
+    },
+    [handleOpenBlockedOnline, onlineEnabled],
+  );
+
+  const handleCancelGameInvite = useCallback((inviteId: string) => {
+    socialWsRef.current?.cancelInvite(inviteId);
+    setOutgoingInvite((cur) => (cur?.inviteId === inviteId ? null : cur));
   }, []);
 
-  const handleInviteFriend = useCallback(async () => {
-    const sub: OnlineSubMode = mode === 'survival' ? 'online_survival' : 'online_friendly';
-    const onlineMode: OnlineMode = mode === 'survival' ? 'survival' : 'classic';
-    const code = await handleCreateOnlineRoom(onlineMode, 3, 'private');
-    if (code) {
-      const inviteUrl = buildRoomInviteUrl(code);
-      await copyTextToClipboard(`${code} · ${inviteUrl}`);
-      setShowLeaderboard(null);
-      setOnlineLobbySubMode(sub);
-      return true;
-    }
-    return false;
-  }, [handleCreateOnlineRoom, mode]);
+  const handleAcceptGameInvite = useCallback((inviteId: string) => {
+    socialWsRef.current?.respondInvite(inviteId, 'accept');
+  }, []);
+
+  const handleDeclineGameInvite = useCallback((inviteId: string) => {
+    socialWsRef.current?.respondInvite(inviteId, 'decline');
+    setIncomingInvite((cur) => (cur?.inviteId === inviteId ? null : cur));
+  }, []);
+
+  const handleExpireIncomingInviteLocal = useCallback((inviteId: string) => {
+    setIncomingInvite((cur) => (cur?.inviteId === inviteId ? null : cur));
+  }, []);
 
   const handleJoinFriendRoom = useCallback(
     (roomCode: string) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline(roomCode);
+        return;
+      }
       setShowLeaderboard(null);
+      setShowFriendsModal({ open: false });
       setOnlineInitialRoomCode(roomCode);
       setOnlineLobbySubMode(mode === 'survival' ? 'online_survival' : 'online_friendly');
       handleJoinOnlineRoom(roomCode);
     },
-    [handleJoinOnlineRoom, mode],
+    [handleJoinOnlineRoom, handleOpenBlockedOnline, mode, onlineEnabled],
   );
 
-  // Auto-open Online Lobby if URL contains ?room=CH-XXXX
+  // Auto-open Online Lobby if URL contains ?room=CH-XXXX (or DesktopOnlyModal with zero server calls when locked)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const roomFromUrl = parseRoomCodeFromSearch(window.location.search);
     if (roomFromUrl) {
       setShowGuide(false);
-      setOnlineInitialRoomCode(roomFromUrl);
-      setOnlineLobbySubMode('online_friendly');
-      handleJoinOnlineRoom(roomFromUrl);
+      if (!onlineEnabled) {
+        setDesktopOnlyModal({ open: true, inviteRoomCode: roomFromUrl });
+      } else {
+        setOnlineInitialRoomCode(roomFromUrl);
+        setOnlineLobbySubMode('online_friendly');
+        handleJoinOnlineRoom(roomFromUrl);
+      }
     }
     return () => {
       onlineClientRef.current?.disconnect();
@@ -2217,10 +2753,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleOpenOnlineLobby = useCallback((subMode: OnlineSubMode) => {
-    setOnlineErrorCode(null);
-    setOnlineLobbySubMode(subMode);
-  }, []);
+  const handleOpenOnlineLobby = useCallback(
+    (subMode: OnlineSubMode) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline();
+        return;
+      }
+      setOnlineErrorCode(null);
+      setOnlineLobbySubMode(subMode);
+    },
+    [handleOpenBlockedOnline, onlineEnabled],
+  );
+
+  const handleOpenFriends = useCallback(
+    (initialTab?: FriendsModalTab) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline();
+        return;
+      }
+      setShowLeaderboard(null);
+      setOnlineLobbySubMode(null);
+      setShowFriendsModal({ open: true, initialTab });
+      void refreshSocialState();
+    },
+    [handleOpenBlockedOnline, onlineEnabled, refreshSocialState],
+  );
   const handleDismissToast = useCallback((id: string) => {
     setToastQueue((q) => q.filter((item) => item.id !== id));
   }, []);
@@ -2290,6 +2847,8 @@ export default function App() {
       !showGodot &&
       !showLeaderboard &&
       !showAudioSettings &&
+      !showFriendsModal.open &&
+      !desktopOnlyModal.open &&
       isPlayerInteractivePhase;
     ctrl.setInteractiveRaycastingEnabled(allowRaycast);
 
@@ -2301,7 +2860,20 @@ export default function App() {
       mode === 'survival' &&
       (hud.currentCard === 'BULLET' || hud.playerHp === 1);
     ctrl.setDealerTense(tense);
-  }, [screen, mode, hud.phase, hud.activeActor, hud.currentCard, hud.playerHp, showRules, showGodot, showLeaderboard, showAudioSettings]);
+  }, [
+    screen,
+    mode,
+    hud.phase,
+    hud.activeActor,
+    hud.currentCard,
+    hud.playerHp,
+    showRules,
+    showGodot,
+    showLeaderboard,
+    showAudioSettings,
+    showFriendsModal.open,
+    desktopOnlyModal.open,
+  ]);
 
   // 15-second idle taunt timer during player's active turn
   useEffect(() => {
@@ -2313,7 +2885,9 @@ export default function App() {
       showRules ||
       showGodot ||
       showLeaderboard ||
-      showAudioSettings
+      showAudioSettings ||
+      showFriendsModal.open ||
+      desktopOnlyModal.open
     ) {
       return;
     }
@@ -2331,6 +2905,8 @@ export default function App() {
     showGodot,
     showLeaderboard,
     showAudioSettings,
+    showFriendsModal.open,
+    desktopOnlyModal.open,
     speakEvent,
   ]);
 
@@ -2397,13 +2973,23 @@ export default function App() {
   // Global keyboard bindings with strict Space isolation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (showGuide || showRules || showGodot || showLeaderboard || showAudioSettings) {
+      if (
+        showGuide ||
+        showRules ||
+        showGodot ||
+        showLeaderboard ||
+        showAudioSettings ||
+        showFriendsModal.open ||
+        desktopOnlyModal.open
+      ) {
         if (e.key === 'Escape') {
           if (showGuide) handleCloseGuide();
           setShowRules(false);
           setShowGodot(false);
           setShowLeaderboard(null);
           setShowAudioSettings(false);
+          setShowFriendsModal({ open: false });
+          setDesktopOnlyModal({ open: false, inviteRoomCode: null });
         }
         return;
       }
@@ -2461,13 +3047,41 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleCloseGuide, handleDrawCard, handlePause, handleResume, handleToggleCamera, handleToggleMute, showAudioSettings, showGodot, showGuide, showLeaderboard, showRules, startNewMatch]);
+  }, [
+    desktopOnlyModal.open,
+    handleCloseGuide,
+    handleDrawCard,
+    handlePause,
+    handleResume,
+    handleToggleCamera,
+    handleToggleMute,
+    showAudioSettings,
+    showFriendsModal.open,
+    showGodot,
+    showGuide,
+    showLeaderboard,
+    showRules,
+    startNewMatch,
+  ]);
 
   const updateIndicators = computeUpdateIndicatorState({
     isTauri,
     availableVersion: availableUpdate?.version ?? null,
     toastDismissed: updateToastDismissed,
   });
+
+  const incomingFriendRequestsCount = onlineEnabled ? socialState.incomingRequests.length : 0;
+
+  const onlineOpponentCode = (() => {
+    if (!onlineRoomState) return null;
+    const oppSeat = onlineRoomState.yourSeat === 'host' ? 'guest' : 'host';
+    return onlineRoomState.players[oppSeat]?.friendCode ?? null;
+  })();
+
+  const onlineOpponentRelation = useMemo(
+    () => resolveOpponentRelation(onlineOpponentCode, socialState),
+    [onlineOpponentCode, socialState],
+  );
 
   const activeOnlineHud: OnlineHudInfo | null = (() => {
     if (!onlineRoomState || onlineRoomState.phase === 'LOBBY') return null;
@@ -2480,10 +3094,15 @@ export default function App() {
       opponentNickname: opp.nickname,
       opponentAvatarId: opp.avatarId,
       opponentFriendCode: opp.friendCode ?? null,
-      opponentIsFriend: Boolean(opp.friendCode && isFriend(profile, opp.friendCode)),
-      onAddOpponentFriend: opp.friendCode
+      opponentRelation: onlineOpponentRelation,
+      onSendOpponentFriendRequest: opp.friendCode
         ? () => {
-            handleAddFriend(opp.friendCode!, opp.nickname, opp.avatarId);
+            void handleSendFriendRequest(opp.friendCode!, opp.nickname, opp.avatarId);
+          }
+        : undefined,
+      onAcceptOpponentFriendRequest: opp.friendCode
+        ? () => {
+            void handleRespondFriendRequest(opp.friendCode!, 'accept');
           }
         : undefined,
       yourThinkTimeMs: me.thinkTimeMs,
@@ -2556,6 +3175,8 @@ export default function App() {
           language={language}
           muted={muted}
           isTauri={isTauri}
+          onlineEnabled={onlineEnabled}
+          incomingFriendRequestsCount={incomingFriendRequestsCount}
           profile={profile}
           guestStatus={guestStatus}
           hasUpdateAvailable={updateIndicators.showRedDot}
@@ -2570,6 +3191,8 @@ export default function App() {
           onOpenAudioSettings={handleOpenAudioSettings}
           onStart={handleStartFromTitle}
           onOpenProfile={handleOpenProfile}
+          onOpenFriends={() => handleOpenFriends()}
+          onBlockedOnlineAttempt={() => handleOpenBlockedOnline()}
           onOpenOnlineLobby={handleOpenOnlineLobby}
           onOpenGuide={handleOpenGuide}
           onOpenRules={handleOpenRules}
@@ -2600,6 +3223,7 @@ export default function App() {
           elapsedSeconds={elapsedSeconds}
           tacticalCam={tacticalCam}
           muted={muted}
+          musicTrackPreference={profile.settings.musicTrackPreference ?? 'auto'}
           speechText={speechText}
           playerNickname={profile.nickname || profile.displayName}
           playerAvatarId={profile.avatarId}
@@ -2619,6 +3243,7 @@ export default function App() {
           selectedResurrectId={selectedResurrectId}
           firstMatchHint={activeFirstMatchHint}
           onToggleCamera={handleToggleCamera}
+          onCycleMusicTrack={handleCycleMusicTrack}
           onOpenAudioSettings={handleOpenAudioSettings}
           onOpenGuide={handleOpenGuide}
           onOpenRules={handleOpenRules}
@@ -2632,6 +3257,31 @@ export default function App() {
           onSelectResurrectPiece={handleSelectResurrectPiece}
           onPickCoinSide={handlePickCoinSide}
         />
+      )}
+
+      {/* Smooth In-Match Emote Picker (opposite the card deck) & Comic Speech Bubbles */}
+      {screen === 'playing' && (
+        <>
+          <EmoteBubbleOverlay
+            mode={mode}
+            language={language}
+            playerEmote={playerEmote}
+            opponentEmote={opponentEmote}
+            liftPlayerForMobileBanner={!isTauri && !mobileBannerDismissed}
+            onClearPlayerEmote={handleClearPlayerEmote}
+            onClearOpponentEmote={handleClearOpponentEmote}
+          />
+          <EmotePicker
+            mode={mode}
+            language={language}
+            lastSentAt={emoteLastSentAt}
+            opponentEmotesMuted={opponentEmotesMuted}
+            disabled={hud.phase === 'MATCH_OVER'}
+            liftForMobileBanner={!isTauri && !mobileBannerDismissed}
+            onSelectEmote={handleSendEmote}
+            onToggleMuteOpponent={handleToggleMuteOpponentEmotes}
+          />
+        </>
       )}
 
       {/* Pause & Game Over Modals */}
@@ -2649,17 +3299,12 @@ export default function App() {
           scoreBreakdown={onlineEndSummary ? null : lastScoreBreakdown}
           onlineSummary={onlineEndSummary}
           onlineYourSeat={onlineRoomState?.yourSeat}
-          onlineOpponentIsFriend={Boolean(
-            onlineEndSummary &&
-              onlineRoomState &&
-              isFriend(
-                profile,
-                onlineEndSummary.players[onlineRoomState.yourSeat === 'host' ? 'guest' : 'host']
-                  .friendCode,
-              ),
-          )}
-          onAddOnlineFriend={(fc, nick, av) => {
-            handleAddFriend(fc, nick, av);
+          onlineOpponentRelation={onlineOpponentRelation}
+          onSendOnlineFriendRequest={(fc, nick, av) => {
+            void handleSendFriendRequest(fc, nick, av);
+          }}
+          onAcceptOnlineFriendRequest={(fc) => {
+            void handleRespondFriendRequest(fc, 'accept');
           }}
           onlineRematchRequestedByMe={Boolean(
             onlineRoomState && onlineRoomState.players[onlineRoomState.yourSeat]?.rematchRequested,
@@ -2699,6 +3344,7 @@ export default function App() {
           muted={muted}
           menuMusicEnabled={profile.settings.menuMusicEnabled}
           gameMusicEnabled={profile.settings.gameMusicEnabled}
+          musicTrackPreference={profile.settings.musicTrackPreference ?? 'auto'}
           musicVolume={profile.settings.musicVolume}
           sfxVolume={profile.settings.sfxVolume}
           voiceVolume={profile.settings.voiceVolume}
@@ -2711,6 +3357,7 @@ export default function App() {
           onToggleMute={handleToggleMute}
           onToggleMenuMusic={handleToggleMenuMusic}
           onToggleGameMusic={handleToggleGameMusic}
+          onChangeMusicTrackPreference={handleChangeMusicTrackPreference}
           onChangeMusicVolume={handleChangeMusicVolume}
           onChangeSfxVolume={handleChangeSfxVolume}
           onChangeVoiceVolume={handleChangeVoiceVolume}
@@ -2719,23 +3366,67 @@ export default function App() {
         />
       )}
 
-      {/* Leader Dashboard, Achievements & Friends Modal */}
+      {/* Leader Dashboard & Achievements Modal */}
       {showLeaderboard && (
         <LeaderDashboardModal
           profile={profile}
           language={language}
           mode={mode}
           initialTab={showLeaderboard}
+          friendsCount={onlineEnabled ? socialState.friends.length : (profile.friends ?? []).length}
+          incomingFriendRequestsCount={incomingFriendRequestsCount}
           onUpdateDisplayName={handleUpdateDisplayName}
-          onAddFriend={handleAddFriend}
-          onRemoveFriend={handleRemoveFriend}
-          onInviteFriend={handleInviteFriend}
-          onJoinFriendRoom={handleJoinFriendRoom}
+          onOpenFriends={() => handleOpenFriends()}
           onOpenProfile={() => {
             setShowLeaderboard(null);
             setShowProfile(true);
           }}
           onClose={() => setShowLeaderboard(null)}
+        />
+      )}
+
+      {/* Dedicated Friends & Live Requests Modal */}
+      {showFriendsModal.open && onlineEnabled && (
+        <FriendsModal
+          profile={profile}
+          language={language}
+          mode={mode}
+          socialState={socialState}
+          loading={socialLoading}
+          initialTab={showFriendsModal.initialTab}
+          outgoingInvite={outgoingInvite}
+          inviteNotice={inviteNotice}
+          onRefresh={() => void refreshSocialState()}
+          onSendRequest={(code) => handleSendFriendRequest(code)}
+          onRespondRequest={handleRespondFriendRequest}
+          onCancelRequest={handleCancelFriendRequest}
+          onRemoveFriend={handleRemoveSocialFriend}
+          onSendGameInvite={handleSendGameInvite}
+          onCancelGameInvite={handleCancelGameInvite}
+          onJoinFriendRoom={handleJoinFriendRoom}
+          onClose={() => setShowFriendsModal({ open: false })}
+        />
+      )}
+
+      {/* Top-Center Live Incoming Game Invite Banner (20s countdown, Accept / Decline) */}
+      {onlineEnabled && incomingInvite && (
+        <GameInviteBanner
+          invite={incomingInvite}
+          mode={mode}
+          language={language}
+          onAccept={handleAcceptGameInvite}
+          onDecline={handleDeclineGameInvite}
+          onExpiredLocal={handleExpireIncomingInviteLocal}
+        />
+      )}
+
+      {/* Desktop App Only Modal (shown in Web production / ?webLock=1 for Online & Friends) */}
+      {desktopOnlyModal.open && (
+        <DesktopOnlyModal
+          mode={mode}
+          language={language}
+          inviteRoomCode={desktopOnlyModal.inviteRoomCode}
+          onClose={() => setDesktopOnlyModal({ open: false, inviteRoomCode: null })}
         />
       )}
 
@@ -2752,7 +3443,7 @@ export default function App() {
       )}
 
       {/* Online 1v1 Live Lobby Modal */}
-      {onlineLobbySubMode && (
+      {onlineLobbySubMode && onlineEnabled && (
         <OnlineLobbyModal
           subMode={onlineLobbySubMode}
           initialRoomCode={onlineInitialRoomCode}
@@ -2762,6 +3453,8 @@ export default function App() {
           roomState={onlineRoomState}
           connectionStatus={onlineConnectionStatus}
           errorCode={onlineErrorCode}
+          incomingFriendRequestsCount={incomingFriendRequestsCount}
+          opponentRelation={onlineOpponentRelation}
           onCreateRoom={(m, hp, vis) => void handleCreateOnlineRoom(m, hp, vis)}
           onQuickMatch={(m, hp) => void handleQuickMatch(m, hp)}
           onJoinRoom={handleJoinOnlineRoom}
@@ -2769,13 +3462,13 @@ export default function App() {
           onSetReady={(ready) => onlineClientRef.current?.setReady(ready)}
           onStartMatch={() => onlineClientRef.current?.startMatch()}
           onLeaveRoom={handleLeaveOnlineRoom}
-          onAddFriend={(fc, nick, av) => {
-            handleAddFriend(fc, nick, av);
+          onSendFriendRequest={(fc, nick, av) => {
+            void handleSendFriendRequest(fc, nick, av);
           }}
-          onOpenFriends={() => {
-            setOnlineLobbySubMode(null);
-            setShowLeaderboard('friends');
+          onAcceptFriendRequest={(fc) => {
+            void handleRespondFriendRequest(fc, 'accept');
           }}
+          onOpenFriends={() => handleOpenFriends()}
           onChangeAvatar={() => setShowProfile(true)}
           onBack={() => setOnlineLobbySubMode(null)}
           onClose={() => setOnlineLobbySubMode(null)}
@@ -2894,7 +3587,7 @@ export default function App() {
       {profile.settings.showFps && fpsValue !== null && (
         <div
           data-testid="fps-counter"
-          className={`fixed bottom-3 left-4 z-20 pointer-events-none font-mono-num text-[11px] font-semibold px-2 py-0.5 rounded border ${
+          className={`fixed bottom-3 ${screen === 'playing' ? 'left-[72px] sm:left-[152px]' : 'left-4'} z-20 pointer-events-none font-mono-num text-[11px] font-semibold px-2 py-0.5 rounded border ${
             mode === 'survival'
               ? 'bg-stone-950/85 border-stone-800 text-amber-400'
               : 'bg-white/88 border-stone-300 text-stone-800'

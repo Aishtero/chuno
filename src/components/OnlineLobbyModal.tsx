@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Check,
+  Clock,
   Copy,
   Globe,
   Heart,
@@ -36,7 +37,8 @@ import {
   fetchPublicRooms,
   formatPublicRoomModeBadge,
 } from '../core/onlineClient';
-import { PlayerProfile, isFriend } from '../core/profileManager';
+import { PlayerProfile } from '../core/profileManager';
+import { OpponentRelationStatus } from '../core/socialClient';
 import { getPlayerAvatar } from '../data/playerAvatars';
 import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
 
@@ -49,6 +51,8 @@ interface OnlineLobbyModalProps {
   roomState: OnlineRoomView | null;
   connectionStatus: OnlineConnectionStatus;
   errorCode: RoomErrorCode | 'CONNECTION_ERROR' | null;
+  incomingFriendRequestsCount?: number;
+  opponentRelation?: OpponentRelationStatus;
   onCreateRoom: (
     onlineMode: OnlineMode,
     startingHp: StartingHp,
@@ -60,7 +64,8 @@ interface OnlineLobbyModalProps {
   onSetReady: (ready: boolean) => void;
   onStartMatch: () => void;
   onLeaveRoom: () => void;
-  onAddFriend?: (friendCode: string, nickname: string, avatarId: string) => void;
+  onSendFriendRequest?: (friendCode: string, nickname: string, avatarId: string) => void;
+  onAcceptFriendRequest?: (friendCode: string) => void;
   onOpenFriends?: () => void;
   onChangeAvatar: () => void;
   onBack: () => void;
@@ -76,6 +81,8 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
   roomState,
   connectionStatus,
   errorCode,
+  incomingFriendRequestsCount = 0,
+  opponentRelation = 'none',
   onCreateRoom,
   onQuickMatch,
   onJoinRoom,
@@ -83,7 +90,8 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
   onSetReady,
   onStartMatch,
   onLeaveRoom,
-  onAddFriend,
+  onSendFriendRequest,
+  onAcceptFriendRequest,
   onOpenFriends,
   onChangeAvatar,
   onBack,
@@ -262,6 +270,11 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
               >
                 <Users className="w-3 h-3" />
                 <span>{t.friendsTab}</span>
+                {incomingFriendRequestsCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white font-mono-num text-[9px] font-bold">
+                    {incomingFriendRequestsCount}
+                  </span>
+                )}
               </button>
             )}
 
@@ -818,7 +831,19 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
                 ].map(({ label, seat, slot }) => {
                   const isOpponent = Boolean(slot && seat !== roomState.yourSeat);
                   const oppCode = slot?.friendCode ?? null;
-                  const alreadyFriend = Boolean(oppCode && isFriend(profile, oppCode));
+                  const relation: OpponentRelationStatus = isOpponent ? opponentRelation : 'none';
+                  const reqSentLabel =
+                    language === 'ru'
+                      ? 'Заявка отправлена'
+                      : language === 'uz'
+                        ? 'So‘rov yuborildi'
+                        : 'Request Sent';
+                  const acceptReqLabel =
+                    language === 'ru'
+                      ? 'Принять заявку'
+                      : language === 'uz'
+                        ? 'So‘rovni qabul qilish'
+                        : 'Accept Request';
 
                   return (
                     <div
@@ -851,7 +876,7 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
 
                           {isOpponent && oppCode && (
                             <div className="pt-2 border-t border-stone-500/20 flex items-center justify-between gap-2">
-                              {alreadyFriend ? (
+                              {relation === 'friend' ? (
                                 <span
                                   data-testid="lobby-friend-badge"
                                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-500"
@@ -859,14 +884,35 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
                                   <Check className="w-3 h-3" />
                                   <span>{t.addedFriendBadge}</span>
                                 </span>
+                              ) : relation === 'incoming' && onAcceptFriendRequest ? (
+                                <button
+                                  type="button"
+                                  data-testid="lobby-accept-friend"
+                                  onClick={() => {
+                                    soundManager.playClick();
+                                    onAcceptFriendRequest(oppCode);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>{acceptReqLabel}</span>
+                                </button>
+                              ) : relation === 'outgoing' ? (
+                                <span
+                                  data-testid="lobby-friend-pending"
+                                  className={`inline-flex items-center gap-1 text-[11px] font-semibold ${mutedText}`}
+                                >
+                                  <Clock className="w-3 h-3" />
+                                  <span>{reqSentLabel}</span>
+                                </span>
                               ) : (
-                                onAddFriend && (
+                                onSendFriendRequest && (
                                   <button
                                     type="button"
                                     data-testid="lobby-add-friend"
                                     onClick={() => {
                                       soundManager.playClick();
-                                      onAddFriend(oppCode, slot.nickname, slot.avatarId);
+                                      onSendFriendRequest(oppCode, slot.nickname, slot.avatarId);
                                     }}
                                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold border transition-colors cursor-pointer ${
                                       isSurv

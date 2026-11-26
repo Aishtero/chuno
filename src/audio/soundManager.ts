@@ -2,6 +2,7 @@ import { GameMode } from '../core/deck/cardData';
 import {
   MusicContext,
   MusicFolder,
+  MusicTrackPreference,
   computeEffectiveMusicVolume,
   isMobileWebEnvironment,
   musicManager,
@@ -266,6 +267,40 @@ class SoundManager {
     if (this.ambientGain && this.ctx) {
       this.ambientGain.gain.setTargetAtTime(this.getTargetAmbientGain(), this.ctx.currentTime, 0.2);
     }
+  }
+
+  public setMusicTrackPreference(pref: MusicTrackPreference): void {
+    musicManager.setTrackPreference(pref);
+    if (this.ambientGain && this.ctx) {
+      this.ambientGain.gain.setTargetAtTime(this.getTargetAmbientGain(), this.ctx.currentTime, 0.2);
+    }
+  }
+
+  public getMusicTrackPreference(): MusicTrackPreference {
+    return musicManager.getTrackPreference();
+  }
+
+  public playInviteChime(): void {
+    if (this.muted || this.sfxVolume <= 0.01) return;
+    const ctx = this.ensureContext(false);
+    if (!ctx) return;
+    const out = this.getSfxBus(ctx);
+    const now = ctx.currentTime;
+    const notes = [659.25, 880, 1174.66];
+    notes.forEach((freq, idx) => {
+      const t0 = now + idx * 0.08;
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t0);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(0.095, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.34);
+      osc.connect(g);
+      g.connect(out);
+      osc.start(t0);
+      osc.stop(t0 + 0.36);
+    });
   }
 
   public getMusicVolume(): number {
@@ -1044,6 +1079,91 @@ class SoundManager {
       osc.start(start);
       osc.stop(start + 0.45);
     });
+  }
+
+  /**
+   * Soft, unobtrusive procedural Web Audio cues for in-match animated emotes and quick phrases.
+   * Respects both global mute and SFX volume slider.
+   */
+  public playEmoteSfx(
+    kind: 'anger' | 'sigh' | 'laugh' | 'fanfare' | 'panic' | 'chime' | 'think' | 'phrase',
+  ): void {
+    if (this.muted || this.sfxVolume <= 0.01) return;
+    const ctx = this.ensureContext(true);
+    if (!ctx) return;
+
+    const out = this.getSfxBus(ctx);
+    const now = ctx.currentTime;
+
+    const tone = (
+      type: OscillatorType,
+      freqStart: number,
+      freqEnd: number,
+      startOffset: number,
+      dur: number,
+      peakGain: number,
+      lowpassHz?: number,
+    ) => {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      const t0 = now + startOffset;
+      osc.frequency.setValueAtTime(freqStart, t0);
+      if (freqEnd !== freqStart) {
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, freqEnd), t0 + dur);
+      }
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(peakGain, t0 + Math.min(0.022, dur * 0.25));
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+      if (lowpassHz) {
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = lowpassHz;
+        osc.connect(lp);
+        lp.connect(g);
+      } else {
+        osc.connect(g);
+      }
+      g.connect(out);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    };
+
+    switch (kind) {
+      case 'chime':
+        tone('sine', 587.33, 587.33, 0, 0.2, 0.11);
+        tone('triangle', 880, 880, 0.075, 0.28, 0.09);
+        break;
+      case 'fanfare':
+        tone('triangle', 523.25, 523.25, 0, 0.13, 0.09);
+        tone('triangle', 659.25, 659.25, 0.06, 0.14, 0.095);
+        tone('triangle', 783.99, 783.99, 0.12, 0.16, 0.1);
+        tone('sine', 1046.5, 1046.5, 0.18, 0.3, 0.09);
+        break;
+      case 'laugh':
+        tone('sine', 490, 560, 0, 0.085, 0.095);
+        tone('sine', 620, 680, 0.095, 0.085, 0.095);
+        tone('sine', 550, 630, 0.19, 0.12, 0.085);
+        break;
+      case 'panic':
+        tone('triangle', 420, 740, 0, 0.11, 0.1, 1800);
+        tone('triangle', 480, 820, 0.105, 0.12, 0.095, 1900);
+        break;
+      case 'anger':
+        tone('sawtooth', 195, 130, 0, 0.22, 0.085, 520);
+        tone('sawtooth', 165, 110, 0.11, 0.2, 0.07, 460);
+        break;
+      case 'sigh':
+        tone('sine', 360, 215, 0, 0.34, 0.095);
+        break;
+      case 'think':
+        tone('sine', 392, 466.16, 0, 0.16, 0.09);
+        break;
+      case 'phrase':
+      default:
+        tone('sine', 440, 640, 0, 0.09, 0.085);
+        break;
+    }
   }
 }
 

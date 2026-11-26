@@ -1,5 +1,23 @@
 import React, { useRef, useState } from 'react';
-import { ExternalLink, FileDown, FileUp, Music, RefreshCw, ShieldCheck, Volume2, VolumeX, X } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  FileDown,
+  FileUp,
+  Music,
+  RefreshCw,
+  ShieldCheck,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
+import {
+  MUSIC_PREFERENCE_ORDER,
+  MusicTrackPreference,
+  getMusicTrackLabel,
+  getNextMusicTrackPreference,
+} from '../audio/musicManager';
 import { DialogueAudioMode, GameMode } from '../core/deck/cardData';
 import { Language, getTranslations } from '../core/localization';
 import { getPrivacyPolicyUrl } from '../core/profileManager';
@@ -10,6 +28,7 @@ interface AudioSettingsModalProps {
   muted: boolean;
   menuMusicEnabled: boolean;
   gameMusicEnabled: boolean;
+  musicTrackPreference: MusicTrackPreference;
   musicVolume: number;
   sfxVolume: number;
   voiceVolume: number;
@@ -22,6 +41,7 @@ interface AudioSettingsModalProps {
   onToggleMute: () => void;
   onToggleMenuMusic: () => void;
   onToggleGameMusic: () => void;
+  onChangeMusicTrackPreference: (pref: MusicTrackPreference) => void;
   onChangeMusicVolume: (volume: number) => void;
   onChangeSfxVolume: (volume: number) => void;
   onChangeVoiceVolume: (volume: number) => void;
@@ -38,6 +58,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
     muted,
     menuMusicEnabled,
     gameMusicEnabled,
+    musicTrackPreference,
     musicVolume,
     sfxVolume,
     voiceVolume,
@@ -50,6 +71,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
     onToggleMute,
     onToggleMenuMusic,
     onToggleGameMusic,
+    onChangeMusicTrackPreference,
     onChangeMusicVolume,
     onChangeSfxVolume,
     onChangeVoiceVolume,
@@ -189,6 +211,85 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
                   {t.gameMusicLabel}
                 </span>
                 {renderSwitch(gameMusicEnabled, onToggleGameMusic, 'toggle-game-music')}
+              </div>
+
+              {/* Free Music Track Selector (Auto or any available game track) */}
+              <div className={`pt-2.5 border-t space-y-2 ${isSurv ? 'border-stone-800' : 'border-stone-200'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-xs font-semibold ${mutedLabelClass}`}>
+                    {language === 'ru'
+                      ? 'Музыкальный трек'
+                      : language === 'uz'
+                        ? 'Musiqa treki'
+                        : 'Music Track'}
+                  </span>
+                  <div className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      data-testid="audio-track-prev"
+                      aria-label={language === 'ru' ? 'Предыдущий трек' : 'Previous track'}
+                      onClick={() =>
+                        onChangeMusicTrackPreference(
+                          getNextMusicTrackPreference(musicTrackPreference, -1),
+                        )
+                      }
+                      className={`p-1 rounded border transition-colors cursor-pointer ${
+                        isSurv
+                          ? 'border-stone-700 bg-stone-950 text-stone-300 hover:border-amber-500 hover:text-amber-300'
+                          : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="audio-track-next"
+                      aria-label={language === 'ru' ? 'Следующий трек' : 'Next track'}
+                      onClick={() =>
+                        onChangeMusicTrackPreference(
+                          getNextMusicTrackPreference(musicTrackPreference, 1),
+                        )
+                      }
+                      className={`p-1 rounded border transition-colors cursor-pointer ${
+                        isSurv
+                          ? 'border-stone-700 bg-stone-950 text-stone-300 hover:border-amber-500 hover:text-amber-300'
+                          : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div
+                  data-testid="audio-track-current"
+                  className="text-xs font-bold text-amber-500 truncate"
+                >
+                  {getMusicTrackLabel(musicTrackPreference, language)}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {MUSIC_PREFERENCE_ORDER.map((pref) => {
+                    const active = musicTrackPreference === pref;
+                    return (
+                      <button
+                        key={pref}
+                        type="button"
+                        data-track-option={pref}
+                        onClick={() => onChangeMusicTrackPreference(pref)}
+                        className={`px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
+                          active
+                            ? isSurv
+                              ? 'bg-amber-500 border-amber-400 text-stone-950'
+                              : 'bg-stone-900 border-stone-900 text-white'
+                            : isSurv
+                              ? 'bg-stone-950 border-stone-700 text-stone-300 hover:border-stone-500'
+                              : 'bg-white border-stone-300 text-stone-700 hover:bg-stone-100'
+                        }`}
+                      >
+                        {getMusicTrackLabel(pref, language)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
