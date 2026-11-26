@@ -1156,7 +1156,8 @@ class DialogueController {
   public speak(entry: VoiceRegistryEntry, lang: Language, opts: DialogueSpeakOptions): void {
     this.stop();
     const mySession = this.sessionId;
-    const text = entry.text[lang];
+    const voiceLang: 'en' | 'ru' = lang === 'ru' ? 'ru' : 'en';
+    const text = entry.text[voiceLang];
     this.onSpeakStateCb = opts.onSpeakingChange;
     soundManager.setVoiceVolume(opts.voiceVolume);
 
@@ -1170,10 +1171,10 @@ class DialogueController {
     // Priority 1: External pre-recorded audio clip (.mp3 / .ogg / .wav)
     // Checks canonical VOICE_SCRIPT.md path `public/audio/voices/<speaker>/<lang>/<id>.mp3` first, then entry.audio[lang].
     // When present, plays exclusively and completely disables system TTS for this phrase.
-    const canonicalPath = `/audio/voices/${entry.speaker}/${lang}/${entry.id}.mp3`;
-    const customSrc = this.customAudioMap.get(`${entry.id}:${lang}`);
+    const canonicalPath = `/audio/voices/${entry.speaker}/${voiceLang}/${entry.id}.mp3`;
+    const customSrc = this.customAudioMap.get(`${entry.id}:${voiceLang}`);
     const discoveredSrc =
-      soundManager.resolveVoiceAsset(canonicalPath) ?? soundManager.resolveVoiceAsset(entry.audio[lang]);
+      soundManager.resolveVoiceAsset(canonicalPath) ?? soundManager.resolveVoiceAsset(entry.audio[voiceLang]);
     const extSrc = customSrc ?? discoveredSrc ?? (ENABLE_EXTERNAL_VOICE_AUDIO ? canonicalPath : null);
     if (wantVoice && extSrc && typeof Audio !== 'undefined') {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {

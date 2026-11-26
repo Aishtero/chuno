@@ -15,6 +15,7 @@ interface AudioSettingsModalProps {
   voiceVolume: number;
   dialogueAudioMode: DialogueAudioMode;
   isTauri?: boolean;
+  availableUpdateVersion?: string | null;
   onExportSave?: () => void;
   onImportSaveJson?: (rawJson: string) => { ok: boolean; error?: string };
   onCheckUpdates?: () => void;
@@ -42,6 +43,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
     voiceVolume,
     dialogueAudioMode,
     isTauri,
+    availableUpdateVersion,
     onExportSave,
     onImportSaveJson,
     onCheckUpdates,
@@ -346,14 +348,32 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = React.memo(
                     type="button"
                     data-testid="settings-check-updates-btn"
                     onClick={onCheckUpdates}
-                    className={`w-full inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
-                      isSurv
-                        ? 'bg-stone-950 border-amber-500/40 text-amber-300 hover:bg-stone-800'
-                        : 'bg-white border-stone-300 text-stone-800 hover:bg-stone-100'
+                    className={`relative w-full inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                      availableUpdateVersion
+                        ? 'bg-red-950/30 border-red-500/60 text-red-300 hover:bg-red-950/50'
+                        : isSurv
+                          ? 'bg-stone-950 border-amber-500/40 text-amber-300 hover:bg-stone-800'
+                          : 'bg-white border-stone-300 text-stone-800 hover:bg-stone-100'
                     }`}
                   >
+                    {availableUpdateVersion && (
+                      <span
+                        data-testid="settings-update-dot"
+                        className="relative flex h-2 w-2 shrink-0"
+                        aria-hidden="true"
+                      >
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                      </span>
+                    )}
                     <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
-                    <span>{isRu ? 'Проверить обновления' : 'Check for Updates'}</span>
+                    <span>
+                      {availableUpdateVersion
+                        ? `${t.updateAvailableTitle} v${availableUpdateVersion}`
+                        : isRu
+                          ? 'Проверить обновления'
+                          : 'Check for Updates'}
+                    </span>
                   </button>
                 )}
                 {saveNotice && (

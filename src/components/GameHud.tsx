@@ -1,9 +1,39 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BookOpen, Clock, Eye, Flag, Handshake, HelpCircle, Lock, Pause, Volume2, VolumeX, X } from 'lucide-react';
+import { BookOpen, Check, Clock, Eye, Flag, Handshake, HelpCircle, Lock, Pause, UserPlus, Volume2, VolumeX, X } from 'lucide-react';
 import { PieceColor, PieceType, PromotablePieceType } from '../core/chess/types';
 import { CardType, GameMode } from '../core/deck/cardData';
 import { Language, formatMatchTime, getTranslations } from '../core/localization';
 import { CoinSide, MatchActor, MatchPhase } from '../core/match/matchEngine';
+import { formatThinkTimeMs } from '../core/onlineClient';
+import { AvatarId } from '../data/playerAvatars';
+import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
+
+export function resolveHudOpponentHpLabel(
+  onlineOpponentNickname: string | null | undefined,
+  fallbackDealerLabel: string,
+): string {
+  const clean = typeof onlineOpponentNickname === 'string' ? onlineOpponentNickname.trim() : '';
+  return clean.length > 0 ? clean : fallbackDealerLabel;
+}
+
+export interface OnlineHudInfo {
+  opponentNickname: string;
+  opponentAvatarId: string;
+  opponentFriendCode?: string | null;
+  opponentIsFriend?: boolean;
+  onAddOpponentFriend?: () => void;
+  yourThinkTimeMs: number;
+  opponentThinkTimeMs: number;
+  activeSide: 'player' | 'opponent';
+  turnStartedAt: number | null;
+  serverClockOffsetMs: number;
+  timerPaused: boolean;
+  opponentDisconnected: boolean;
+  canClaimDisconnectWin: boolean;
+  drawOfferFromOpponent: boolean;
+  onAcceptDraw: () => void;
+  onClaimDisconnectWin: () => void;
+}
 
 interface HeartRowProps {
   hp: number;
@@ -102,6 +132,11 @@ interface GameHudProps {
   tacticalCam: boolean;
   muted: boolean;
   speechText: string | null;
+  playerNickname?: string;
+  playerAvatarId?: AvatarId;
+  onlineHud?: OnlineHudInfo | null;
+  isTauri?: boolean;
+  hasUpdateAvailable?: boolean;
   guestBadgeText?: string | null;
   firstMatchHint?: string | null;
   wildSelectedSq: number | null;
@@ -144,6 +179,11 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   tacticalCam,
   muted,
   speechText,
+  playerNickname,
+  playerAvatarId,
+  onlineHud,
+  isTauri,
+  hasUpdateAvailable,
   guestBadgeText,
   firstMatchHint,
   wildSelectedSq,
@@ -168,6 +208,27 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   const isSurv = mode === 'survival';
   const isPlayerTurn = activeActor === 'player';
   const [confirmingResign, setConfirmingResign] = useState(false);
+  const [tickNow, setTickNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!onlineHud || onlineHud.timerPaused || onlineHud.turnStartedAt === null || phase === 'MATCH_OVER') {
+      return;
+    }
+    setTickNow(Date.now());
+    const id = window.setInterval(() => setTickNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [onlineHud, phase]);
+
+  const liveElapsedTurnMs =
+    onlineHud && !onlineHud.timerPaused && onlineHud.turnStartedAt !== null && phase !== 'MATCH_OVER'
+      ? Math.max(0, tickNow + onlineHud.serverClockOffsetMs - onlineHud.turnStartedAt)
+      : 0;
+  const yourLiveThinkMs = onlineHud
+    ? onlineHud.yourThinkTimeMs + (onlineHud.activeSide === 'player' ? liveElapsedTurnMs : 0)
+    : 0;
+  const oppLiveThinkMs = onlineHud
+    ? onlineHud.opponentThinkTimeMs + (onlineHud.activeSide === 'opponent' ? liveElapsedTurnMs : 0)
+    : 0;
 
   useEffect(() => {
     if (!confirmingResign) return;
@@ -197,9 +258,26 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
         {/* Top-Left: Match State Placard */}
         <div className={`pointer-events-auto shrink-0 px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg border min-w-0 sm:min-w-[248px] max-w-full sm:max-w-none ${cardBg}`}>
           <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-amber-500 whitespace-nowrap">
-              {isPlayerTurn ? t.yourTurn : t.opponentTurn}
-            </span>
+            <div className="inline-flex items-center gap-1.5 min-w-0">
+              {playerAvatarId && (
+                <PlayerAvatarPortrait avatarId={playerAvatarId} size={20} />
+              )}
+              {playerNickname && (
+                <span
+                  data-testid="hud-player-nickname"
+                  className={`text-xs font-bold truncate max-w-[96px] ${isSurv ? 'text-stone-100' : 'text-stone-900'}`}
+                >
+                  {playerNickname}
+                </span>
+              )}
+              <span className="text-xs font-semibold uppercase tracking-wider text-amber-500 whitespace-nowrap">
+                {isPlayerTurn
+                  ? t.yourTurn
+                  : onlineHud
+                    ? `${t.opponentTurn} (${onlineHud.opponentNickname})`
+                    : t.opponentTurn}
+              </span>
+            </div>
             {guestBadgeText && (
               <span
                 data-testid="hud-guest-badge"
@@ -230,10 +308,116 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
             </div>
           )}
 
+          {onlineHud && (
+            <div
+              data-testid="online-think-timers"
+              className={`mt-2 pt-2 border-t ${isSurv ? 'border-stone-800' : 'border-stone-200'} grid grid-cols-2 gap-2 text-xs`}
+            >
+              <div
+                className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded border transition-colors ${
+                  onlineHud.activeSide === 'player' && !onlineHud.timerPaused
+                    ? 'border-amber-500/70 bg-amber-500/15'
+                    : isSurv
+                      ? 'border-stone-800 bg-stone-900/60'
+                      : 'border-stone-200 bg-stone-50'
+                }`}
+              >
+                <span className="truncate font-semibold max-w-[74px]">{playerNickname || 'You'}</span>
+                <span
+                  data-testid="hud-your-think-time"
+                  className="font-mono-num font-bold text-amber-500 shrink-0"
+                >
+                  {formatThinkTimeMs(yourLiveThinkMs)}
+                </span>
+              </div>
+              <div
+                className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded border transition-colors ${
+                  onlineHud.activeSide === 'opponent' && !onlineHud.timerPaused
+                    ? 'border-amber-500/70 bg-amber-500/15'
+                    : isSurv
+                      ? 'border-stone-800 bg-stone-900/60'
+                      : 'border-stone-200 bg-stone-50'
+                }`}
+              >
+                <div className="inline-flex items-center gap-1 min-w-0">
+                  <PlayerAvatarPortrait avatarId={onlineHud.opponentAvatarId} size={16} />
+                  <span className="truncate font-semibold max-w-[60px]">{onlineHud.opponentNickname}</span>
+                  {onlineHud.opponentFriendCode && (
+                    onlineHud.opponentIsFriend ? (
+                      <span
+                        data-testid="hud-friend-badge"
+                        title={t.addedFriendBadge}
+                        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 shrink-0"
+                      >
+                        <Check className="w-2.5 h-2.5" />
+                      </span>
+                    ) : (
+                      onlineHud.onAddOpponentFriend && (
+                        <button
+                          type="button"
+                          data-testid="hud-add-friend"
+                          title={t.addFriendBtn}
+                          aria-label={t.addFriendBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onlineHud.onAddOpponentFriend?.();
+                          }}
+                          className={`inline-flex items-center justify-center w-4 h-4 rounded-full border transition-colors shrink-0 cursor-pointer ${
+                            isSurv
+                              ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-stone-950'
+                              : 'border-emerald-600/50 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white'
+                          }`}
+                        >
+                          <UserPlus className="w-2.5 h-2.5" />
+                        </button>
+                      )
+                    )
+                  )}
+                </div>
+                <span
+                  data-testid="hud-opp-think-time"
+                  className="font-mono-num font-bold text-amber-500 shrink-0"
+                >
+                  {formatThinkTimeMs(oppLiveThinkMs)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {onlineHud?.opponentDisconnected && (
+            <div className="mt-2 px-2.5 py-1.5 rounded border border-amber-500/40 bg-amber-500/10 text-[11px] flex items-center justify-between gap-2">
+              <span className="text-amber-300">{t.onlineDisconnectPaused}</span>
+              {onlineHud.canClaimDisconnectWin && (
+                <button
+                  type="button"
+                  onClick={onlineHud.onClaimDisconnectWin}
+                  className="px-2 py-0.5 rounded bg-amber-600 text-stone-950 font-bold whitespace-nowrap cursor-pointer"
+                >
+                  {t.onlineClaimDisconnectWin}
+                </button>
+              )}
+            </div>
+          )}
+
+          {onlineHud?.drawOfferFromOpponent && phase !== 'MATCH_OVER' && (
+            <div className="mt-2 px-2.5 py-1.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-[11px] flex items-center justify-between gap-2">
+              <span>{t.agreeToDraw}?</span>
+              <button
+                type="button"
+                onClick={onlineHud.onAcceptDraw}
+                className="px-2 py-0.5 rounded bg-emerald-600 text-white font-bold whitespace-nowrap cursor-pointer"
+              >
+                {t.agreeToDraw}
+              </button>
+            </div>
+          )}
+
           {isSurv && (
             <div className="flex items-center justify-between gap-4 mt-2 pt-2 border-t border-stone-800 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="text-stone-400">{t.playerHp}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-stone-400 truncate max-w-[88px]">
+                  {onlineHud ? (playerNickname || t.playerHp) : t.playerHp}
+                </span>
                 <HeartRow
                   hp={playerHp}
                   maxHp={maxHp}
@@ -241,13 +425,18 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
                   ariaLabel={`Player HP ${playerHp} of ${maxHp}`}
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-stone-400">{t.dealerHp}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  data-testid="hud-opponent-hp-label"
+                  className="text-stone-400 truncate max-w-[96px]"
+                >
+                  {resolveHudOpponentHpLabel(onlineHud?.opponentNickname, t.dealerHp)}
+                </span>
                 <HeartRow
                   hp={opponentHp}
                   maxHp={maxHp}
                   tone="dealer"
-                  ariaLabel={`Dealer HP ${opponentHp} of ${maxHp}`}
+                  ariaLabel={`${resolveHudOpponentHpLabel(onlineHud?.opponentNickname, 'Dealer')} HP ${opponentHp} of ${maxHp}`}
                 />
               </div>
             </div>
@@ -293,7 +482,7 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
               }`}
             >
               <span className={`font-bold mr-1.5 ${isSurv ? 'text-red-400' : 'text-emerald-700'}`}>
-                {isSurv ? t.dealerName : t.friendName}:
+                {onlineHud ? onlineHud.opponentNickname : isSurv ? t.dealerName : t.friendName}:
               </span>
               <span>“{speechText}”</span>
             </div>
@@ -422,9 +611,19 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
               e.currentTarget.blur();
               onOpenAudioSettings();
             }}
-            className={`p-2 rounded-md border transition-colors cursor-pointer ${btnMuted}`}
+            className={`relative p-2 rounded-md border transition-colors cursor-pointer ${btnMuted}`}
           >
             {muted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
+            {isTauri && hasUpdateAvailable && (
+              <span
+                data-testid="hud-update-dot"
+                className="absolute -top-1 -right-1 flex h-2.5 w-2.5"
+                aria-hidden="true"
+              >
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+              </span>
+            )}
           </button>
 
           <button
@@ -597,7 +796,15 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
             <div className="text-sm font-bold text-red-500">{t.chooseCoinTitle}</div>
             {activeActor === 'opponent' ? (
               <>
-                <p className="text-xs text-stone-300 text-center max-w-xs">{t.dealerFlippedHint}</p>
+                <p className="text-xs text-stone-300 text-center max-w-xs">
+                  {onlineHud
+                    ? language === 'ru'
+                      ? `${onlineHud.opponentNickname} вытянул Пулю! Выберите сторону монеты.`
+                      : language === 'uz'
+                        ? `${onlineHud.opponentNickname} O‘q kartasini tortdi! Tanga tomonini tanlang.`
+                        : `${onlineHud.opponentNickname} drew the Bullet! Call the coin flip.`
+                    : t.dealerFlippedHint}
+                </p>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"

@@ -1022,7 +1022,15 @@ test('mergeProfiles, exportProfileToJson, and parseAndValidateImportedProfile pr
     first_seat: '2026-11-20T09:00:00Z',
     survive_hard: '2026-11-21T12:00:00Z',
   };
-  diskBackup.friends = [{ id: 'F-1', displayName: 'CompanionA', addedAt: '2026-11-22T00:00:00Z' }];
+  diskBackup.friends = [
+    {
+      friendCode: 'CHUNO-COMP-0001',
+      nickname: 'CompanionA',
+      avatarId: 'artist',
+      addedAt: '2026-11-22T00:00:00Z',
+      matchesTogether: 2,
+    },
+  ];
   diskBackup.futureExpansionField = { guild: 'Buro' };
 
   const merged = mergeProfiles(local, diskBackup);
@@ -1058,7 +1066,7 @@ test('mergeProfiles, exportProfileToJson, and parseAndValidateImportedProfile pr
 
 test('v0.2.3 profile migration preserves v0.2.2 achievements, stats, and settings without reset', async () => {
   const { normalizeAndMigrateProfile, mergeProfiles, APP_VERSION, getPrivacyPolicyUrl } = await import('./profileManager');
-  assert.equal(APP_VERSION, '0.2.3');
+  assert.equal(APP_VERSION, '0.3.0');
 
   const v022Profile = {
     schemaVersion: 2,
@@ -1194,8 +1202,8 @@ test('v0.2.3 webGuestGate resets cleanly on version bump from 0.2.2 and stays di
   recordWebGuestMatchCompleted({ appVersion: '0.2.2', storage, isTauri: false });
   assert.equal(getWebGuestStatus({ appVersion: '0.2.2', storage, isTauri: false }).isLocked, true);
 
-  // Default APP_VERSION is now 0.2.3 -> fresh 0/3 guest allowance
-  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.2.3');
+  // Default APP_VERSION is now 0.3.0 -> fresh 0/3 guest allowance
+  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.3.0');
   const v023Web = getWebGuestStatus({ storage, isTauri: false });
   assert.equal(v023Web.isGuestMode, true);
   assert.equal(v023Web.matchesPlayed, 0);
@@ -1205,4 +1213,417 @@ test('v0.2.3 webGuestGate resets cleanly on version bump from 0.2.2 and stays di
   const v023Tauri = getWebGuestStatus({ storage, isTauri: true });
   assert.equal(v023Tauri.isGuestMode, false);
   assert.equal(v023Tauri.isLocked, false);
+});
+
+test('v0.2.3 profile migrates safely to schema v3 with nickname and avatarId without losing achievements or stats', async () => {
+  const {
+    CURRENT_PROFILE_SCHEMA_VERSION,
+    normalizeAndMigrateProfile,
+    mergeProfiles,
+    createDefaultProfile,
+  } = await import('./profileManager');
+  const { DEFAULT_AVATAR_ID } = await import('../data/playerAvatars');
+
+  const legacyV023Save = {
+    schemaVersion: 2,
+    updatedAt: '2026-11-24T12:00:00.000Z',
+    playerId: 'CHUNO-OLD1-SAVE',
+    displayName: 'GrandMaster99',
+    score: 4850,
+    language: 'ru',
+    muted: false,
+    hasSeenTutorial: true,
+    hasSeenFirstMatchHints: true,
+    settings: {
+      graphicsQuality: 'medium',
+      showFps: true,
+      menuMusicEnabled: true,
+      gameMusicEnabled: false,
+      musicVolume: 0.45,
+      sfxVolume: 0.5,
+      voiceVolume: 0.7,
+      dialogueAudioMode: 'sfx',
+      audioDefaultsVersion: 4,
+    },
+    unlockedAchievements: {
+      first_seat: '2026-11-20T10:00:00.000Z',
+      survive_hard: '2026-11-22T18:30:00.000Z',
+    },
+    stats: {
+      totalMatches: 27,
+      lightWins: 14,
+      survivalHardWins: 3,
+      bestStreak: 6,
+      fastestWinSec: 74,
+    },
+    friends: [{ id: 'CHUNO-FRND-0001', displayName: 'Alice', addedAt: '2026-11-23T09:00:00.000Z' }],
+  };
+
+  const { profile, needsSave } = normalizeAndMigrateProfile(legacyV023Save);
+  assert.equal(needsSave, true);
+  assert.equal(profile.schemaVersion, CURRENT_PROFILE_SCHEMA_VERSION);
+  assert.equal(profile.nickname, 'GrandMaster99');
+  assert.equal(profile.displayName, 'GrandMaster99');
+  assert.equal(profile.avatarId, DEFAULT_AVATAR_ID);
+  assert.equal(profile.score, 4850);
+  assert.equal(profile.language, 'ru');
+  assert.equal(profile.stats.totalMatches, 27);
+  assert.equal(profile.stats.survivalHardWins, 3);
+  assert.equal(profile.stats.fastestWinSec, 74);
+  assert.equal(profile.unlockedAchievements.first_seat, '2026-11-20T10:00:00.000Z');
+  assert.equal(profile.unlockedAchievements.survive_hard, '2026-11-22T18:30:00.000Z');
+  assert.equal(profile.friends?.length, 1);
+
+  // Merge preserves selected avatarId and custom nickname
+  const customized = createDefaultProfile();
+  customized.nickname = 'ShadowQueen';
+  customized.displayName = 'ShadowQueen';
+  customized.avatarId = 'night_lady';
+  const merged = mergeProfiles(profile, customized, true);
+  assert.equal(merged.nickname, 'ShadowQueen');
+  assert.equal(merged.avatarId, 'night_lady');
+  assert.equal(merged.score, 4850);
+  assert.equal(merged.unlockedAchievements.survive_hard, '2026-11-22T18:30:00.000Z');
+});
+
+test('Nickname validation (2-18 chars) and 10-avatar registry integrity (6 male + 4 female, EN/RU/UZ)', async () => {
+  const { validateNickname } = await import('./profileManager');
+  const {
+    PLAYER_AVATARS,
+    getAvatarsByGender,
+    getPlayerAvatar,
+    isValidAvatarId,
+  } = await import('../data/playerAvatars');
+
+  assert.equal(validateNickname('   ').valid, false);
+  assert.equal(validateNickname('A').valid, false);
+  assert.equal(validateNickname('A').error, 'too_short');
+  assert.equal(validateNickname('  Alex   Pro  ').valid, true);
+  assert.equal(validateNickname('  Alex   Pro  ').normalized, 'Alex Pro');
+  assert.equal(validateNickname('1234567890123456789').valid, false);
+  assert.equal(validateNickname('1234567890123456789').error, 'too_long');
+
+  assert.equal(PLAYER_AVATARS.length, 10);
+  const male = getAvatarsByGender('male');
+  const female = getAvatarsByGender('female');
+  assert.equal(male.length, 6);
+  assert.equal(female.length, 4);
+  assert.equal(getAvatarsByGender('all').length, 10);
+
+  const ids = new Set(PLAYER_AVATARS.map((a) => a.id));
+  assert.equal(ids.size, 10);
+
+  for (const av of PLAYER_AVATARS) {
+    assert.equal(isValidAvatarId(av.id), true);
+    assert.ok(av.name.en.length > 0 && av.name.ru.length > 0 && av.name.uz.length > 0);
+    assert.ok(av.tagline.en.length > 0 && av.tagline.ru.length > 0 && av.tagline.uz.length > 0);
+    assert.ok(av.threeConfig.coatColor.startsWith('#'));
+    assert.equal(getPlayerAvatar(av.id).id, av.id);
+  }
+  assert.equal(isValidAvatarId('unknown_skin'), false);
+  assert.equal(getPlayerAvatar('unknown_skin').id, 'strategist');
+});
+
+test('Leaderboard/Achievements tab switching and Online 1v1 submodes & demo room codes work cleanly', async () => {
+  const {
+    ONLINE_SUBMODES,
+    buildDemoInviteLink,
+    generateDemoRoomCode,
+    isValidDemoRoomCode,
+    nextLeaderDashboardTab,
+  } = await import('./menuNavigation');
+  const { getTranslations } = await import('./localization');
+
+  assert.equal(nextLeaderDashboardTab('leaderboard', 'achievements'), 'achievements');
+  assert.equal(nextLeaderDashboardTab('achievements', 'leaderboard'), 'leaderboard');
+
+  assert.deepEqual([...ONLINE_SUBMODES], ['online_friendly', 'online_survival']);
+  const code = generateDemoRoomCode(() => 0.25);
+  assert.equal(isValidDemoRoomCode(code), true);
+  assert.ok(code.startsWith('CH-'));
+  assert.equal(isValidDemoRoomCode('ch-4829'), true);
+  assert.equal(isValidDemoRoomCode('INVALID'), false);
+
+  const friendlyLink = buildDemoInviteLink(code, 'online_friendly');
+  const survivalLink = buildDemoInviteLink(code, 'online_survival');
+  assert.ok(friendlyLink.includes(`/friendly/${code}`));
+  assert.ok(survivalLink.includes(`/survival/${code}`));
+
+  for (const lang of ['en', 'ru', 'uz'] as const) {
+    const t = getTranslations(lang);
+    assert.ok(t.modeLight.length > 0);
+    assert.ok(t.modeSurvival.length > 0);
+    assert.ok(t.modeOnline.length > 0);
+    assert.ok(t.leaderboardTab.length > 0);
+    assert.ok(t.achievementsTab.length > 0);
+    assert.ok(t.onlinePreviewNotice.length > 0);
+  }
+});
+
+test('Online client helpers: formatThinkTimeMs (MM:SS), 1/2/3 HP options, ?room=CH-XXXX parsing, and EN/RU/UZ labels', async () => {
+  const {
+    STARTING_HP_OPTIONS,
+    formatThinkTimeMs,
+    parseRoomCodeFromSearch,
+    wsUrlToHttpBase,
+  } = await import('./onlineClient');
+  const { getTranslations } = await import('./localization');
+
+  assert.equal(formatThinkTimeMs(0), '00:00');
+  assert.equal(formatThinkTimeMs(102_400), '01:42');
+  assert.equal(formatThinkTimeMs(365_000), '06:05');
+  assert.equal(formatThinkTimeMs(-500), '00:00');
+
+  assert.deepEqual([...STARTING_HP_OPTIONS], [3, 2, 1]);
+  assert.equal(parseRoomCodeFromSearch('?room=ch-4829'), 'CH-4829');
+  assert.equal(parseRoomCodeFromSearch('?foo=1&room=CH-AB12'), 'CH-AB12');
+  assert.equal(parseRoomCodeFromSearch('?room=bad'), null);
+  assert.equal(wsUrlToHttpBase('ws://127.0.0.1:8787'), 'http://127.0.0.1:8787');
+  assert.equal(wsUrlToHttpBase('wss://chuno-mp.example.workers.dev'), 'https://chuno-mp.example.workers.dev');
+
+  assert.equal(getTranslations('en').onlineFriendlyTitle, 'Classic');
+  assert.equal(getTranslations('ru').onlineFriendlyTitle, 'Классический');
+  assert.equal(getTranslations('uz').onlineFriendlyTitle, 'Klassik');
+  assert.equal(getTranslations('en').onlineSurvivalTitle, 'Survival');
+  assert.equal(getTranslations('ru').onlineSurvivalTitle, 'Выживание');
+  assert.equal(getTranslations('uz').onlineSurvivalTitle, 'Omon qolish');
+});
+
+test('Desktop update notifications: red dot persists after Later, completely hidden in web browser, 20m cooldown', async () => {
+  const {
+    UPDATE_CHECK_COOLDOWN_MS,
+    computeUpdateIndicatorState,
+    shouldRunBackgroundUpdateCheck,
+  } = await import('./updateNotificationState');
+
+  // Web browser: never shows red dot or toast and never runs background check
+  assert.equal(shouldRunBackgroundUpdateCheck({ isTauri: false, lastCheckedAt: null, now: 1000 }), false);
+  assert.deepEqual(
+    computeUpdateIndicatorState({ isTauri: false, availableVersion: '0.3.0', toastDismissed: false }),
+    { showRedDot: false, showToast: false },
+  );
+
+  // Desktop Tauri: shows both red dot & toast when update available
+  assert.deepEqual(
+    computeUpdateIndicatorState({ isTauri: true, availableVersion: '0.3.0', toastDismissed: false }),
+    { showRedDot: true, showToast: true },
+  );
+
+  // Clicking "Later" hides toast, but keeps red dot lit
+  assert.deepEqual(
+    computeUpdateIndicatorState({ isTauri: true, availableVersion: '0.3.0', toastDismissed: true }),
+    { showRedDot: true, showToast: false },
+  );
+
+  // Background check throttle
+  assert.equal(shouldRunBackgroundUpdateCheck({ isTauri: true, lastCheckedAt: null, now: 1000 }), true);
+  assert.equal(shouldRunBackgroundUpdateCheck({ isTauri: true, lastCheckedAt: 1000, now: 1000 + 60_000 }), false);
+  assert.equal(
+    shouldRunBackgroundUpdateCheck({ isTauri: true, lastCheckedAt: 1000, now: 1000 + UPDATE_CHECK_COOLDOWN_MS }),
+    true,
+  );
+});
+
+test('copyTextToClipboard uses async clipboard and cleanly falls back to execCommand when clipboard fails', async () => {
+  const { copyTextToClipboard } = await import('./clipboard');
+  const { getTranslations } = await import('./localization');
+
+  let written = '';
+  const okPrimary = await copyTextToClipboard('CH-9X2K', {
+    writeText: async (v) => {
+      written = v;
+    },
+  });
+  assert.equal(okPrimary, true);
+  assert.equal(written, 'CH-9X2K');
+
+  let fallbackVal = '';
+  const okFallback = await copyTextToClipboard('CH-7M4P', {
+    writeText: async () => {
+      throw new Error('Insecure context');
+    },
+    execCopyFallback: (v) => {
+      fallbackVal = v;
+      return true;
+    },
+  });
+  assert.equal(okFallback, true);
+  assert.equal(fallbackVal, 'CH-7M4P');
+
+  assert.equal(await copyTextToClipboard(''), false);
+
+  for (const lang of ['en', 'ru', 'uz'] as const) {
+    const t = getTranslations(lang);
+    assert.ok(t.onlineCopyCode.length > 0);
+    assert.ok(t.onlineCodeCopied.length > 0);
+  }
+});
+
+test('resolveOnlineAutoCamera switches to top-down CAM_BOARD_TACTICAL on player move/wild/revive and returns to CAM_IDLE', async () => {
+  const { resolveOnlineAutoCamera } = await import('./onlineCamera');
+
+  // Player draws NUM_2 -> CAM_CARD_DRAW then CAM_BOARD_TACTICAL
+  const drawToMove = resolveOnlineAutoCamera({
+    prevPhase: 'AWAIT_DRAW_CARD',
+    prevActiveSeat: 'host',
+    nextPhase: 'PLAYER_MOVE_LOOP',
+    nextActiveSeat: 'host',
+    yourSeat: 'host',
+    events: [{ type: 'CARD_DRAWN', actor: 'host', card: 'NUM_2' }],
+  });
+  assert.equal(drawToMove.immediatePreset, 'CAM_CARD_DRAW');
+  assert.equal(drawToMove.delayedPreset, 'CAM_BOARD_TACTICAL');
+
+  // Direct entry into AWAIT_RESURRECT_PLACEMENT on your turn -> immediate CAM_BOARD_TACTICAL
+  const revive = resolveOnlineAutoCamera({
+    prevPhase: 'AWAIT_DRAW_CARD',
+    prevActiveSeat: 'host',
+    nextPhase: 'AWAIT_RESURRECT_PLACEMENT',
+    nextActiveSeat: 'host',
+    yourSeat: 'host',
+  });
+  assert.equal(revive.immediatePreset, 'CAM_BOARD_TACTICAL');
+
+  // Turn ends and passes to opponent -> returns to CAM_IDLE
+  const passToOpp = resolveOnlineAutoCamera({
+    prevPhase: 'PLAYER_MOVE_LOOP',
+    prevActiveSeat: 'host',
+    nextPhase: 'AWAIT_DRAW_CARD',
+    nextActiveSeat: 'guest',
+    yourSeat: 'host',
+  });
+  assert.equal(passToOpp.immediatePreset, 'CAM_IDLE');
+
+  // No phase/turn change -> preserves user manual camera toggle
+  const noChange = resolveOnlineAutoCamera({
+    prevPhase: 'PLAYER_MOVE_LOOP',
+    prevActiveSeat: 'host',
+    nextPhase: 'PLAYER_MOVE_LOOP',
+    nextActiveSeat: 'host',
+    yourSeat: 'host',
+  });
+  assert.equal(noChange.immediatePreset, null);
+
+  // Survival coin resolved -> CAM_COIN_FLIP then returns to CAM_IDLE
+  const coin = resolveOnlineAutoCamera({
+    prevPhase: 'AWAIT_COIN_CHOICE',
+    prevActiveSeat: 'host',
+    nextPhase: 'AWAIT_DRAW_CARD',
+    nextActiveSeat: 'guest',
+    yourSeat: 'host',
+    events: [{ type: 'COIN_RESOLVED', drawer: 'host', guesser: 'guest', actual: 'heads', guessedRight: false }],
+  });
+  assert.equal(coin.immediatePreset, 'CAM_COIN_FLIP');
+  assert.equal(coin.delayedPreset, 'CAM_IDLE');
+});
+
+test('Friends list: addFriend validation, duplicate & self protection, removeFriend, match sync, and lossless v4 migration', async () => {
+  const {
+    CURRENT_PROFILE_SCHEMA_VERSION,
+    addFriend,
+    createDefaultProfile,
+    isFriend,
+    normalizeAndMigrateProfile,
+    removeFriend,
+    syncFriendMatchPresence,
+  } = await import('./profileManager');
+
+  assert.equal(CURRENT_PROFILE_SCHEMA_VERSION, 4);
+
+  const me = createDefaultProfile();
+  me.playerId = 'CHUNO-SELF-1234';
+  me.score = 1900;
+  me.unlockedAchievements = { first_win: '2026-11-24T00:00:00Z' };
+
+  // Rejects invalid code and self code
+  assert.deepEqual(addFriend(me, { friendCode: 'BAD-CODE' }), { ok: false, error: 'invalid_code' });
+  assert.deepEqual(addFriend(me, { friendCode: 'chuno-self-1234' }), { ok: false, error: 'self' });
+
+  // Adds valid friend cleanly
+  const r1 = addFriend(me, {
+    friendCode: 'chuno-frnd-8888',
+    nickname: 'LadyLuna',
+    avatarId: 'artist',
+  });
+  assert.equal(r1.ok, true);
+  if (!r1.ok) return;
+  assert.equal(r1.alreadyExists, false);
+  assert.equal(r1.entry.friendCode, 'CHUNO-FRND-8888');
+  assert.equal(r1.entry.nickname, 'LadyLuna');
+  assert.equal(r1.entry.avatarId, 'artist');
+  assert.equal(r1.entry.matchesTogether, 0);
+  assert.equal(isFriend(r1.profile, 'CHUNO-FRND-8888'), true);
+
+  // Duplicate protection updates nickname/avatar without duplicating entry
+  const rDup = addFriend(r1.profile, {
+    friendCode: 'CHUNO-FRND-8888',
+    nickname: 'LunaPro',
+    avatarId: 'tactician',
+  });
+  assert.equal(rDup.ok, true);
+  if (!rDup.ok) return;
+  assert.equal(rDup.alreadyExists, true);
+  assert.equal(rDup.profile.friends?.length, 1);
+  assert.equal(rDup.profile.friends?.[0].nickname, 'LunaPro');
+  assert.equal(rDup.profile.friends?.[0].avatarId, 'tactician');
+
+  // Re-meeting friend in match updates skin/nick and increments matchesTogether
+  const synced = syncFriendMatchPresence(
+    rDup.profile,
+    { friendCode: 'CHUNO-FRND-8888', nickname: 'LunaGrand', avatarId: 'grandmaster' },
+    true,
+  );
+  assert.equal(synced.friends?.[0].nickname, 'LunaGrand');
+  assert.equal(synced.friends?.[0].avatarId, 'grandmaster');
+  assert.equal(synced.friends?.[0].matchesTogether, 1);
+
+  // Remove friend cleanly
+  const removed = removeFriend(synced, 'CHUNO-FRND-8888');
+  assert.equal(removed.friends?.length, 0);
+  assert.equal(isFriend(removed, 'CHUNO-FRND-8888'), false);
+
+  // Legacy v3 profile with old { id, displayName } friend migrates losslessly to v4
+  const migrated = normalizeAndMigrateProfile({
+    schemaVersion: 3,
+    playerId: 'CHUNO-V003-USER',
+    nickname: 'VeteranOne',
+    avatarId: 'veteran',
+    score: 3200,
+    unlockedAchievements: { first_win: '2026-11-20T00:00:00Z' },
+    friends: [{ id: 'CHUNO-OLD1-2222', displayName: 'OldPal', addedAt: '2026-11-21T00:00:00Z' }],
+  });
+  assert.equal(migrated.profile.schemaVersion, 4);
+  assert.equal(migrated.profile.score, 3200);
+  assert.ok(migrated.profile.unlockedAchievements.first_win);
+  assert.equal(migrated.profile.friends?.length, 1);
+  assert.equal(migrated.profile.friends?.[0].friendCode, 'CHUNO-OLD1-2222');
+  assert.equal(migrated.profile.friends?.[0].nickname, 'OldPal');
+});
+
+test('Online HUD & CRT monitor never show Dealer for real opponent, and public rooms format cleanly in EN/RU/UZ', async () => {
+  const { resolveHudOpponentHpLabel } = await import('../components/GameHud');
+  const { formatCrtOpponentLabel } = await import('../presentation/proceduralAssets');
+  const { formatPublicRoomModeBadge } = await import('./onlineClient');
+
+  // Online match uses real opponent nickname (never Dealer)
+  assert.equal(resolveHudOpponentHpLabel('LadyLuna', 'Dealer'), 'LadyLuna');
+  assert.notEqual(resolveHudOpponentHpLabel('HostKing', 'Дилер'), 'Дилер');
+  // Solo match falls back to Dealer
+  assert.equal(resolveHudOpponentHpLabel(null, 'Dealer'), 'Dealer');
+
+  // CRT monitor formats short & long opponent nicknames cleanly
+  assert.equal(formatCrtOpponentLabel('HostKing'), 'HOSTKING');
+  assert.equal(formatCrtOpponentLabel('VeryLongPlayerNickname'), 'VERYLONG…');
+  assert.equal(formatCrtOpponentLabel(null), 'DEALER');
+
+  // Open rooms list badge formatting across EN / RU / UZ
+  assert.equal(formatPublicRoomModeBadge({ mode: 'classic', startingHp: 3 }, 'en'), 'Classic');
+  assert.equal(formatPublicRoomModeBadge({ mode: 'classic', startingHp: 3 }, 'ru'), 'Классический');
+  assert.equal(formatPublicRoomModeBadge({ mode: 'classic', startingHp: 3 }, 'uz'), 'Klassik');
+  assert.equal(formatPublicRoomModeBadge({ mode: 'survival', startingHp: 2 }, 'en'), 'Survival · 2 HP');
+  assert.equal(formatPublicRoomModeBadge({ mode: 'survival', startingHp: 2 }, 'ru'), 'Выживание · 2 HP');
+  assert.equal(formatPublicRoomModeBadge({ mode: 'survival', startingHp: 1 }, 'uz'), 'Omon qolish · 1 HP');
+
+  const { PROD_MP_SERVER_URL } = await import('./onlineClient');
+  assert.equal(PROD_MP_SERVER_URL, 'wss://chuno-mp-server.kizaru0260.workers.dev');
 });

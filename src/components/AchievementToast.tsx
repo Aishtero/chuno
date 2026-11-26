@@ -72,13 +72,13 @@ export const AchievementToast: React.FC<AchievementToastProps> = React.memo(
                     +{pts}
                   </span>
                 </div>
-                <div className="text-sm font-bold leading-snug truncate">{ach.title[language]}</div>
+                <div className="text-sm font-bold leading-snug truncate">{ach.title[language === 'ru' ? 'ru' : 'en']}</div>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${st.badge}`}>
-                    {st.label[language]}
+                    {st.label[language === 'ru' ? 'ru' : 'en']}
                   </span>
                   <span className="text-[11px] text-stone-400 truncate">
-                    {ach.description[language]}
+                    {ach.description[language === 'ru' ? 'ru' : 'en']}
                   </span>
                 </div>
               </div>

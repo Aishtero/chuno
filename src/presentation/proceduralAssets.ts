@@ -741,8 +741,8 @@ export function createMaterialBank(mode: GameMode, maxAniso: number): MaterialBa
     cardBack: markShared(new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: cardBackTex,
-      roughness: isSurv ? 0.68 : 0.45,
-      metalness: 0.06,
+      roughness: isSurv ? 0.88 : 0.82,
+      metalness: 0.02,
     })),
     bloodDecal: markShared(new THREE.MeshStandardMaterial({
       color: 0xffffff,
@@ -994,12 +994,19 @@ export function getCardFaceMaterial(card: CardType, mode: GameMode): THREE.MeshS
   const cached = cardFaceMatCache.get(key);
   if (cached) return cached;
 
+  const isSurv = mode === 'survival';
   const faceTex = markShared(createCardFaceTexture(card, mode));
+  faceTex.anisotropy = 4;
+  // Matte paper stock (roughness 0.94, metalness 0) + subtle self-lit face map so overhead
+  // lamps never create a blinding specular hotspot on the card digits/symbols.
   const mat = markShared(new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: faceTex,
-    roughness: 0.42,
-    metalness: 0.05,
+    emissive: 0xffffff,
+    emissiveMap: faceTex,
+    emissiveIntensity: isSurv ? 0.34 : 0.14,
+    roughness: 0.94,
+    metalness: 0,
   }));
   cardFaceMatCache.set(key, mat);
   return mat;
@@ -1017,17 +1024,17 @@ export function createCardFaceTexture(card: CardType, mode: GameMode): THREE.Can
 
   const accent =
     card === 'BULLET'
-      ? '#dc2626'
+      ? '#ef4444'
       : card === 'WILD'
-        ? '#d97706'
+        ? isSurv ? '#f59e0b' : '#b45309'
         : card === 'REVERSE'
-          ? '#0284c7'
+          ? isSurv ? '#38bdf8' : '#0369a1'
           : card === 'SKIP'
-            ? '#e11d48'
+            ? isSurv ? '#fb7185' : '#be123c'
             : card === 'PLUS_2' || card === 'PLUS_4'
-              ? '#16a34a'
+              ? isSurv ? '#4ade80' : '#15803d'
               : isSurv
-                ? '#c29b61'
+                ? '#e2b974'
                 : '#8b5e3c';
 
   ctx.strokeStyle = accent;
@@ -1520,6 +1527,14 @@ export interface HpMonitorStateUpdate {
   maxHp?: number;
   elapsedSeconds?: number;
   suppressLossAnim?: boolean;
+  opponentLabel?: string;
+}
+
+export function formatCrtOpponentLabel(raw?: string | null): string {
+  const clean = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+  if (!clean) return 'DEALER';
+  const upper = clean.toUpperCase();
+  return upper.length > 9 ? `${upper.slice(0, 8)}…` : upper;
 }
 
 export interface HpMonitorRig {
@@ -1662,6 +1677,7 @@ export function buildHpMonitor(initialMaxHp: number): HpMonitorRig {
   let playerHp = maxHp;
   let opponentHp = maxHp;
   let elapsedSeconds = 0;
+  let opponentLabel = 'DEALER';
 
   interface LossAnim {
     who: 'player' | 'opponent';
@@ -1717,13 +1733,16 @@ export function buildHpMonitor(initialMaxHp: number): HpMonitorRig {
     ctx.lineTo(W - 26, 206);
     ctx.stroke();
 
-    // Row Labels
+    // Row Labels (dynamically sized for opponent nickname so it never overlaps hearts)
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
-    ctx.font = 'bold 34px monospace';
+    const oppDisplay = formatCrtOpponentLabel(opponentLabel);
+    const oppFontSize = oppDisplay.length <= 6 ? 34 : oppDisplay.length <= 8 ? 28 : 24;
+    ctx.font = `bold ${oppFontSize}px monospace`;
     ctx.fillStyle = '#ef4444';
-    ctx.fillText('DEALER', 28, 158);
+    ctx.fillText(oppDisplay, 28, 158);
 
+    ctx.font = 'bold 34px monospace';
     ctx.fillStyle = '#34d399';
     ctx.fillText('YOU', 28, 256);
 
@@ -1800,9 +1819,14 @@ export function buildHpMonitor(initialMaxHp: number): HpMonitorRig {
     const nextPlayer = u.playerHp !== undefined ? Math.max(0, Math.min(nextMax, u.playerHp)) : playerHp;
     const nextOpp = u.opponentHp !== undefined ? Math.max(0, Math.min(nextMax, u.opponentHp)) : opponentHp;
     const nextSec = u.elapsedSeconds !== undefined ? Math.max(0, Math.floor(u.elapsedSeconds)) : elapsedSeconds;
+    const nextLabel = u.opponentLabel !== undefined ? (u.opponentLabel.trim() || 'DEALER') : opponentLabel;
 
     const changed =
-      nextMax !== maxHp || nextPlayer !== playerHp || nextOpp !== opponentHp || nextSec !== elapsedSeconds;
+      nextMax !== maxHp ||
+      nextPlayer !== playerHp ||
+      nextOpp !== opponentHp ||
+      nextSec !== elapsedSeconds ||
+      nextLabel !== opponentLabel;
     if (!changed) return;
 
     if (!u.suppressLossAnim && nextMax === maxHp) {
@@ -1819,6 +1843,7 @@ export function buildHpMonitor(initialMaxHp: number): HpMonitorRig {
     playerHp = nextPlayer;
     opponentHp = nextOpp;
     elapsedSeconds = nextSec;
+    opponentLabel = nextLabel;
     redraw();
   };
 

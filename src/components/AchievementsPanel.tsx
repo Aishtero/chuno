@@ -68,6 +68,8 @@ export const AchievementsPanel: React.FC<AchievementsPanelProps> = React.memo(
     const [filter, setFilter] = useState<FilterKey>('all');
     const isSurv = mode === 'survival';
     const isRu = language === 'ru';
+    const isUz = language === 'uz';
+    const achLang: 'en' | 'ru' = isRu ? 'ru' : 'en';
 
     const progressSnap = useMemo(() => getAchievementProgressSnapshot(profile), [profile]);
     const unlockedCount = useMemo(
@@ -85,12 +87,12 @@ export const AchievementsPanel: React.FC<AchievementsPanelProps> = React.memo(
     }, [filter, profile.unlockedAchievements]);
 
     const filters: { key: FilterKey; label: string }[] = [
-      { key: 'all', label: isRu ? 'Все (32)' : 'All (32)' },
-      { key: 'unlocked', label: isRu ? `Открытые (${unlockedCount})` : `Unlocked (${unlockedCount})` },
-      { key: 'light', label: isRu ? 'Дружеский' : 'Friendly' },
-      { key: 'survival', label: isRu ? 'Выживание' : 'Survival' },
-      { key: 'tactics', label: isRu ? 'Тактика' : 'Tactics' },
-      { key: 'general', label: isRu ? 'Общие' : 'General' },
+      { key: 'all', label: isRu ? 'Все (32)' : isUz ? 'Barchasi (32)' : 'All (32)' },
+      { key: 'unlocked', label: isRu ? `Открытые (${unlockedCount})` : isUz ? `Ochilgan (${unlockedCount})` : `Unlocked (${unlockedCount})` },
+      { key: 'light', label: isRu ? 'Кампания' : isUz ? 'Kampaniya' : 'Campaign' },
+      { key: 'survival', label: isRu ? 'Выживание' : isUz ? 'Omon qolish' : 'Survival' },
+      { key: 'tactics', label: isRu ? 'Тактика' : isUz ? 'Taktika' : 'Tactics' },
+      { key: 'general', label: isRu ? 'Общие' : isUz ? 'Umumiy' : 'General' },
     ];
 
     const formatDate = (iso: string): string => {
@@ -220,7 +222,7 @@ export const AchievementsPanel: React.FC<AchievementsPanelProps> = React.memo(
                   <div className="min-w-0 flex-1 flex flex-col justify-between">
                     <div>
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-sm font-bold leading-tight">{ach.title[language]}</span>
+                        <span className="text-sm font-bold leading-tight">{ach.title[achLang]}</span>
                         <span className="font-mono-num text-[11px] font-bold text-amber-500 shrink-0">
                           +{pts}
                         </span>
@@ -230,7 +232,7 @@ export const AchievementsPanel: React.FC<AchievementsPanelProps> = React.memo(
                           isSurv ? 'text-stone-400' : 'text-stone-600'
                         }`}
                       >
-                        {ach.description[language]}
+                        {ach.description[achLang]}
                       </p>
                     </div>
 
@@ -260,7 +262,7 @@ export const AchievementsPanel: React.FC<AchievementsPanelProps> = React.memo(
                         <span
                           className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${style.badge}`}
                         >
-                          {style.label[language]}
+                          {style.label[achLang]}
                         </span>
                         {unlocked && unlockedAt && (
                           <span className="text-[10px] font-mono-num text-emerald-500">

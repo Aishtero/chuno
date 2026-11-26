@@ -1,11 +1,12 @@
 import { CardType } from './deck/cardData';
 
-export type Language = 'en' | 'ru';
+export type Language = 'en' | 'ru' | 'uz';
 
 export interface Translations {
   gameTitle: string;
   modeSurvival: string;
   modeLight: string;
+  modeOnline: string;
   difficultyEasy: string;
   difficultyMedium: string;
   difficultyHard: string;
@@ -16,6 +17,96 @@ export interface Translations {
   startGame: string;
   rulesAndStats: string;
   godotSource: string;
+  leaderboardBtn: string;
+  leaderboardTab: string;
+  achievementsTab: string;
+  profileBtn: string;
+  profileModalTitle: string;
+  nicknameLabel: string;
+  nicknamePlaceholder: string;
+  nicknameHint: string;
+  nicknameErrShort: string;
+  nicknameErrLong: string;
+  saveNickname: string;
+  savedLabel: string;
+  avatarSectionTitle: string;
+  avatarFilterAll: string;
+  avatarFilterMale: string;
+  avatarFilterFemale: string;
+  changeAvatarBtn: string;
+  avatar3dReadyHint: string;
+  onlineSubtitle: string;
+  onlineFriendlyTitle: string;
+  onlineFriendlyDesc: string;
+  onlineSurvivalTitle: string;
+  onlineSurvivalDesc: string;
+  onlineCreateRoom: string;
+  onlineJoinRoom: string;
+  onlineRoomCodeLabel: string;
+  onlineCopyCode: string;
+  onlineCodeCopied: string;
+  onlineCopyLink: string;
+  onlineLinkCopied: string;
+  onlineRegenerateCode: string;
+  onlineEnterCodePlaceholder: string;
+  onlineJoinBtn: string;
+  onlineBackToModes: string;
+  onlinePreviewNotice: string;
+  onlineJoinPreviewReply: string;
+  onlineInvalidCode: string;
+  onlineConnecting: string;
+  onlineConnected: string;
+  onlineReconnecting: string;
+  onlineServerOffline: string;
+  onlineRoomNotFound: string;
+  onlineRoomFull: string;
+  onlineWaitingGuest: string;
+  onlineReady: string;
+  onlineNotReady: string;
+  onlineStartMatch: string;
+  onlineStartingHpLabel: string;
+  onlineRematch: string;
+  onlineRematchWaiting: string;
+  onlineRematchRequested: string;
+  onlineThinkTimeLabel: string;
+  onlineAvgTurnLabel: string;
+  onlineDisconnectPaused: string;
+  onlineClaimDisconnectWin: string;
+  onlineDisconnectForfeitReason: string;
+  onlineVisibilityLabel: string;
+  onlinePublicLabel: string;
+  onlinePrivateLabel: string;
+  onlinePublicBadge: string;
+  onlinePrivateBadge: string;
+  onlineQuickMatchBtn: string;
+  onlineQuickMatchDesc: string;
+  onlineQuickMatchSearching: string;
+  onlineOpenRoomsTitle: string;
+  onlineRefreshBtn: string;
+  onlineNoOpenRooms: string;
+  onlineJoinByCodeTitle: string;
+  onlineEnterRoomBtn: string;
+  friendsTab: string;
+  yourFriendCodeLabel: string;
+  addFriendBtn: string;
+  addedFriendBadge: string;
+  addFriendByCodeTitle: string;
+  friendCodePlaceholder: string;
+  friendNameOptionalPlaceholder: string;
+  addFriendSubmitBtn: string;
+  friendErrInvalidCode: string;
+  friendErrSelf: string;
+  friendErrDuplicate: string;
+  friendsEmptyHint: string;
+  friendMatchesTogether: string;
+  friendInviteBtn: string;
+  friendInviteCopied: string;
+  friendJoinOpenRoomBtn: string;
+  friendRemoveBtn: string;
+  friendOnlineNow: string;
+  updateAvailableTitle: string;
+  updateNowBtn: string;
+  updateLaterBtn: string;
   yourTurn: string;
   opponentTurn: string;
   dealerName: string;
@@ -132,7 +223,8 @@ export interface Translations {
 const EN: Translations = {
   gameTitle: 'ChUno',
   modeSurvival: 'Survival',
-  modeLight: 'Friendly',
+  modeLight: 'Campaign',
+  modeOnline: 'Online',
   difficultyEasy: 'Easy · 3 HP',
   difficultyMedium: 'Medium · 2 HP',
   difficultyHard: 'Hard · 1 HP',
@@ -141,8 +233,98 @@ const EN: Translations = {
   personalityEgoist: 'Egoist',
   personalityCalm: 'Calm Philosopher',
   startGame: 'Take a Seat',
-  rulesAndStats: 'Rules & Profile',
+  rulesAndStats: 'Rules & Stats',
   godotSource: 'Godot 4.3+',
+  leaderboardBtn: 'Leaderboard',
+  leaderboardTab: 'Leaderboard',
+  achievementsTab: 'Achievements',
+  profileBtn: 'Profile',
+  profileModalTitle: 'Player Profile',
+  nicknameLabel: 'Player Name',
+  nicknamePlaceholder: 'Enter nickname (2–18 chars)',
+  nicknameHint: '2–18 characters. Shown on the leaderboard, HUD, and online lobby.',
+  nicknameErrShort: 'Name must be at least 2 characters.',
+  nicknameErrLong: 'Name must be 18 characters or fewer.',
+  saveNickname: 'Save',
+  savedLabel: 'Saved',
+  avatarSectionTitle: 'Table Avatar',
+  avatarFilterAll: 'All (10)',
+  avatarFilterMale: 'Male (6)',
+  avatarFilterFemale: 'Female (4)',
+  changeAvatarBtn: 'Change Avatar',
+  avatar3dReadyHint: '3D figure synced by avatar ID for upcoming 1v1 tables',
+  onlineSubtitle: 'Choose a 1v1 mode to play with a friend by code or invite link.',
+  onlineFriendlyTitle: 'Classic',
+  onlineFriendlyDesc: 'Standard 1v1 ChUno match with a friend by room code or invite link.',
+  onlineSurvivalTitle: 'Survival',
+  onlineSurvivalDesc: '1v1 duel with Bullet cards, revolver, and host-selected 1 / 2 / 3 HP.',
+  onlineCreateRoom: 'Create Room',
+  onlineJoinRoom: 'Join by Code',
+  onlineRoomCodeLabel: 'Room Code',
+  onlineCopyCode: 'Copy Code',
+  onlineCodeCopied: 'Copied!',
+  onlineCopyLink: 'Copy Invite Link',
+  onlineLinkCopied: 'Link Copied',
+  onlineRegenerateCode: 'New Room',
+  onlineEnterCodePlaceholder: 'CH-XXXX',
+  onlineJoinBtn: 'Join Room',
+  onlineBackToModes: 'Back to Online Modes',
+  onlinePreviewNotice: 'Connected to local multiplayer server.',
+  onlineJoinPreviewReply: 'Connecting to room...',
+  onlineInvalidCode: 'Enter a room code like CH-4829.',
+  onlineConnecting: 'Connecting...',
+  onlineConnected: 'Connected',
+  onlineReconnecting: 'Reconnecting...',
+  onlineServerOffline: 'Multiplayer server unreachable. Start chuno-mp-server on port 8787.',
+  onlineRoomNotFound: 'Room not found. Check the code and try again.',
+  onlineRoomFull: 'This room already has 2 players.',
+  onlineWaitingGuest: 'Waiting for opponent to join...',
+  onlineReady: 'Ready',
+  onlineNotReady: 'Not Ready',
+  onlineStartMatch: 'Start Match',
+  onlineStartingHpLabel: 'Starting HP',
+  onlineRematch: 'Rematch',
+  onlineRematchWaiting: 'Waiting for opponent...',
+  onlineRematchRequested: 'Opponent wants a rematch!',
+  onlineThinkTimeLabel: 'Think Time',
+  onlineAvgTurnLabel: 'Avg / turn',
+  onlineDisconnectPaused: 'Opponent disconnected · Timer paused (60s reconnect window)',
+  onlineClaimDisconnectWin: 'Claim Win (Disconnect)',
+  onlineDisconnectForfeitReason: 'Opponent disconnected for over 60s',
+  onlineVisibilityLabel: 'Room Visibility',
+  onlinePublicLabel: 'Open (visible to all)',
+  onlinePrivateLabel: 'Private (code only)',
+  onlinePublicBadge: 'Open',
+  onlinePrivateBadge: 'Private',
+  onlineQuickMatchBtn: 'Quick Play · Random Opponent',
+  onlineQuickMatchDesc: 'Instantly join an open table or open a public room while waiting.',
+  onlineQuickMatchSearching: 'Finding opponent...',
+  onlineOpenRoomsTitle: 'Open Rooms',
+  onlineRefreshBtn: 'Refresh',
+  onlineNoOpenRooms: 'No open rooms yet — press Quick Play or create one!',
+  onlineJoinByCodeTitle: 'Join by Room Code (CH-XXXX)',
+  onlineEnterRoomBtn: 'Join',
+  friendsTab: 'Friends',
+  yourFriendCodeLabel: 'Your Friend Code',
+  addFriendBtn: 'Add Friend',
+  addedFriendBadge: 'Friends ✓',
+  addFriendByCodeTitle: 'Add Friend by Code',
+  friendCodePlaceholder: 'CHUNO-XXXX-XXXX',
+  friendNameOptionalPlaceholder: 'Nickname (optional)',
+  addFriendSubmitBtn: 'Add',
+  friendErrInvalidCode: 'Enter a valid Friend Code like CHUNO-4A8K-9P2Q.',
+  friendErrSelf: 'You cannot add your own Friend Code.',
+  friendErrDuplicate: 'This player is already in your Friends list.',
+  friendsEmptyHint: 'No friends yet. Share your Friend Code or add an opponent during or after an online match.',
+  friendMatchesTogether: 'Matches together',
+  friendInviteBtn: 'Invite to Room',
+  friendInviteCopied: 'Invite Copied!',
+  friendJoinOpenRoomBtn: 'Join Room',
+  friendRemoveBtn: 'Remove',
+  friendOnlineNow: 'Waiting in Open Room',
+  updateAvailableTitle: 'Update available',
+  updateNowBtn: 'Update',
+  updateLaterBtn: 'Later',
   yourTurn: 'Your Turn',
   opponentTurn: 'Opponent Turn',
   dealerName: 'The Dealer',
@@ -312,7 +494,8 @@ const EN: Translations = {
 const RU: Translations = {
   gameTitle: 'ChUno',
   modeSurvival: 'Выживание',
-  modeLight: 'Дружеский',
+  modeLight: 'Кампания',
+  modeOnline: 'Игра по сети',
   difficultyEasy: 'Лёгкий · 3 HP',
   difficultyMedium: 'Средний · 2 HP',
   difficultyHard: 'Сложный · 1 HP',
@@ -321,8 +504,98 @@ const RU: Translations = {
   personalityEgoist: 'Эгоист',
   personalityCalm: 'Спокойный философ',
   startGame: 'Сесть за стол',
-  rulesAndStats: 'Правила и Профиль',
+  rulesAndStats: 'Правила и Статистика',
   godotSource: 'Код Godot 4.3+',
+  leaderboardBtn: 'Таблица лидеров',
+  leaderboardTab: 'Таблица лидеров',
+  achievementsTab: 'Ачивки',
+  profileBtn: 'Профиль',
+  profileModalTitle: 'Профиль игрока',
+  nicknameLabel: 'Имя игрока',
+  nicknamePlaceholder: 'Введите ник (2–18 символов)',
+  nicknameHint: 'От 2 до 18 символов. Отображается в таблице лидеров, HUD и сетевом лобби.',
+  nicknameErrShort: 'Минимум 2 символа.',
+  nicknameErrLong: 'Максимум 18 символов.',
+  saveNickname: 'Сохранить',
+  savedLabel: 'Сохранено',
+  avatarSectionTitle: 'Облик за столом',
+  avatarFilterAll: 'Все (10)',
+  avatarFilterMale: 'Мужские (6)',
+  avatarFilterFemale: 'Женские (4)',
+  changeAvatarBtn: 'Сменить облик',
+  avatar3dReadyHint: '3D-модель привязана к avatarId для будущих матчей 1 на 1',
+  onlineSubtitle: 'Выберите формат 1 на 1 для партии с другом по коду или ссылке.',
+  onlineFriendlyTitle: 'Классический',
+  onlineFriendlyDesc: 'Обычная партия 1 на 1 по правилам ChUno с другом по коду или ссылке.',
+  onlineSurvivalTitle: 'Выживание',
+  onlineSurvivalDesc: 'Дуэль 1 на 1 с картой пули, револьвером и выбором 1 / 2 / 3 HP.',
+  onlineCreateRoom: 'Создать комнату',
+  onlineJoinRoom: 'Войти по коду',
+  onlineRoomCodeLabel: 'Код комнаты',
+  onlineCopyCode: 'Копировать код',
+  onlineCodeCopied: 'Скопировано!',
+  onlineCopyLink: 'Копировать ссылку',
+  onlineLinkCopied: 'Ссылка скопирована',
+  onlineRegenerateCode: 'Новая комната',
+  onlineEnterCodePlaceholder: 'CH-XXXX',
+  onlineJoinBtn: 'Войти в комнату',
+  onlineBackToModes: 'Назад к режимам сети',
+  onlinePreviewNotice: 'Подключено к серверу мультиплеера.',
+  onlineJoinPreviewReply: 'Подключение к комнате...',
+  onlineInvalidCode: 'Введите код вида CH-4829.',
+  onlineConnecting: 'Подключение...',
+  onlineConnected: 'Подключено',
+  onlineReconnecting: 'Переподключение...',
+  onlineServerOffline: 'Сервер мультиплеера недоступен. Запустите chuno-mp-server на порту 8787.',
+  onlineRoomNotFound: 'Комната не найдена. Проверьте код.',
+  onlineRoomFull: 'В этой комнате уже 2 игрока.',
+  onlineWaitingGuest: 'Ожидание второго игрока...',
+  onlineReady: 'Готов',
+  onlineNotReady: 'Не готов',
+  onlineStartMatch: 'Начать партию',
+  onlineStartingHpLabel: 'Стартовые жизни',
+  onlineRematch: 'Реванш',
+  onlineRematchWaiting: 'Ждём соперника...',
+  onlineRematchRequested: 'Соперник предлагает реванш!',
+  onlineThinkTimeLabel: 'Время на ходы',
+  onlineAvgTurnLabel: 'Среднее / ход',
+  onlineDisconnectPaused: 'Соперник отключился · Таймер на паузе (60 сек на возврат)',
+  onlineClaimDisconnectWin: 'Засчитать победу (выход)',
+  onlineDisconnectForfeitReason: 'Соперник не вернулся за 60 сек',
+  onlineVisibilityLabel: 'Видимость комнаты',
+  onlinePublicLabel: 'Открытая (видна всем)',
+  onlinePrivateLabel: 'Приватная (только по коду)',
+  onlinePublicBadge: 'Открытая',
+  onlinePrivateBadge: 'Приватная',
+  onlineQuickMatchBtn: 'Быстрая игра · Случайный соперник',
+  onlineQuickMatchDesc: 'Мгновенный вход в свободную комнату или создание открытого стола.',
+  onlineQuickMatchSearching: 'Поиск соперника...',
+  onlineOpenRoomsTitle: 'Открытые комнаты',
+  onlineRefreshBtn: 'Обновить',
+  onlineNoOpenRooms: 'Пока нет открытых комнат — нажмите «Быстрая игра» или создайте стол.',
+  onlineJoinByCodeTitle: 'Войти по коду комнаты (CH-XXXX)',
+  onlineEnterRoomBtn: 'Войти',
+  friendsTab: 'Друзья',
+  yourFriendCodeLabel: 'Ваш код друга',
+  addFriendBtn: 'В друзья',
+  addedFriendBadge: 'В друзьях ✓',
+  addFriendByCodeTitle: 'Добавить друга по коду',
+  friendCodePlaceholder: 'CHUNO-XXXX-XXXX',
+  friendNameOptionalPlaceholder: 'Имя (необязательно)',
+  addFriendSubmitBtn: 'Добавить',
+  friendErrInvalidCode: 'Введите код вида CHUNO-4A8K-9P2Q.',
+  friendErrSelf: 'Нельзя добавить свой собственный код друга.',
+  friendErrDuplicate: 'Этот игрок уже есть в списке друзей.',
+  friendsEmptyHint: 'Список друзей пока пуст. Поделитесь кодом друга или добавьте соперника во время/после матча.',
+  friendMatchesTogether: 'Совместных матчей',
+  friendInviteBtn: 'Пригласить в комнату',
+  friendInviteCopied: 'Приглашение скопировано!',
+  friendJoinOpenRoomBtn: 'Присоединиться',
+  friendRemoveBtn: 'Удалить',
+  friendOnlineNow: 'Ждёт в открытой комнате',
+  updateAvailableTitle: 'Доступно обновление',
+  updateNowBtn: 'Обновить',
+  updateLaterBtn: 'Позже',
   yourTurn: 'Ваш ход',
   opponentTurn: 'Ход соперника',
   dealerName: 'Дилер',
@@ -489,8 +762,150 @@ const RU: Translations = {
   privacyLinkLabel: 'Политика конфиденциальности',
 };
 
+const UZ: Translations = {
+  ...EN,
+  gameTitle: 'ChUno',
+  modeSurvival: 'Omon qolish',
+  modeLight: 'Kampaniya',
+  modeOnline: 'Tarmoq o‘yini',
+  difficultyEasy: 'Oson · 3 HP',
+  difficultyMedium: 'O‘rtacha · 2 HP',
+  difficultyHard: 'Qiyin · 1 HP',
+  personalityUnknown: 'Noma’lum',
+  personalityEnthusiast: 'Ishtiyoqmand',
+  personalityEgoist: 'Egoist',
+  personalityCalm: 'Sokin faylasuf',
+  startGame: 'Stolga o‘tirish',
+  rulesAndStats: 'Qoidalar va Statistika',
+  godotSource: 'Godot 4.3+ kodi',
+  leaderboardBtn: 'Peshqadamlar',
+  leaderboardTab: 'Peshqadamlar',
+  achievementsTab: 'Yutuqlar',
+  profileBtn: 'Profil',
+  profileModalTitle: 'O‘yinchi profili',
+  nicknameLabel: 'O‘yinchi ismi',
+  nicknamePlaceholder: 'Ism kiriting (2–18 belgi)',
+  nicknameHint: '2 dan 18 belgigacha. Peshqadamlar jadvali, HUD va onlayn lobbida ko‘rinadi.',
+  nicknameErrShort: 'Kamida 2 ta belgi kiriting.',
+  nicknameErrLong: 'Ko‘pi bilan 18 ta belgi.',
+  saveNickname: 'Saqlash',
+  savedLabel: 'Saqlandi',
+  avatarSectionTitle: 'Stoldagi qiyofa',
+  avatarFilterAll: 'Barchasi (10)',
+  avatarFilterMale: 'Erkaklar (6)',
+  avatarFilterFemale: 'Ayollar (4)',
+  changeAvatarBtn: 'Qiyofani almashtirish',
+  avatar3dReadyHint: 'Kelajakdagi 1v1 stollarda 3D-model avatarId orqali chiziladi',
+  onlineSubtitle: 'Do‘st bilan kod yoki havola orqali 1v1 rejimini tanlang.',
+  onlineFriendlyTitle: 'Klassik',
+  onlineFriendlyDesc: 'Xona kodi yoki havola orqali do‘st bilan oddiy 1v1 ChUno o‘yini.',
+  onlineSurvivalTitle: 'Omon qolish',
+  onlineSurvivalDesc: 'O‘q kartasi, revolver va 1 / 2 / 3 HP tanlovi bilan 1v1 duel.',
+  onlineCreateRoom: 'Xona yaratish',
+  onlineJoinRoom: 'Kod bilan kirish',
+  onlineRoomCodeLabel: 'Xona kodi',
+  onlineCopyCode: 'Kodni nusxalash',
+  onlineCodeCopied: 'Nusxalandi!',
+  onlineCopyLink: 'Havolani nusxalash',
+  onlineLinkCopied: 'Havola nusxalandi',
+  onlineRegenerateCode: 'Yangi xona',
+  onlineEnterCodePlaceholder: 'CH-XXXX',
+  onlineJoinBtn: 'Xonaga kirish',
+  onlineBackToModes: 'Tarmoq rejimlariga qaytish',
+  onlinePreviewNotice: 'Tarmoq serveriga ulandi.',
+  onlineJoinPreviewReply: 'Xonaga ulanilmoqda...',
+  onlineInvalidCode: 'CH-4829 ko‘rinishidagi kod kiriting.',
+  onlineConnecting: 'Ulanmoqda...',
+  onlineConnected: 'Ulandi',
+  onlineReconnecting: 'Qayta ulanmoqda...',
+  onlineServerOffline: 'Tarmoq serveri ishlamayapti (chuno-mp-server, 8787-port).',
+  onlineRoomNotFound: 'Xona topilmadi. Kodni tekshiring.',
+  onlineRoomFull: 'Bu xonada allaqachon 2 ta o‘yinchi bor.',
+  onlineWaitingGuest: 'Ikkinchi o‘yinchi kutilmoqda...',
+  onlineReady: 'Tayyor',
+  onlineNotReady: 'Tayyor emas',
+  onlineStartMatch: 'O‘yinni boshlash',
+  onlineStartingHpLabel: 'Boshlang‘ich HP',
+  onlineRematch: 'Revansh',
+  onlineRematchWaiting: 'Raqib kutilmoqda...',
+  onlineRematchRequested: 'Raqib revansh taklif qildi!',
+  onlineThinkTimeLabel: 'Yurish vaqti',
+  onlineAvgTurnLabel: 'O‘rtacha / yurish',
+  onlineDisconnectPaused: 'Raqib uzildi · Taymer pauzada (60 soniya)',
+  onlineClaimDisconnectWin: 'G‘alabani olish',
+  onlineDisconnectForfeitReason: 'Raqib 60 soniyada qaytmadi',
+  onlineVisibilityLabel: 'Xona ko‘rinishi',
+  onlinePublicLabel: 'Ochiq (hammaga ko‘rinadi)',
+  onlinePrivateLabel: 'Yopiq (faqat kod bilan)',
+  onlinePublicBadge: 'Ochiq',
+  onlinePrivateBadge: 'Yopiq',
+  onlineQuickMatchBtn: 'Tez o‘yin · Tasodifiy raqib',
+  onlineQuickMatchDesc: 'Bo‘sh ochiq xonaga kirish yoki kutish uchun ochiq stol yaratish.',
+  onlineQuickMatchSearching: 'Raqib qidirilmoqda...',
+  onlineOpenRoomsTitle: 'Ochiq xonalar',
+  onlineRefreshBtn: 'Yangilash',
+  onlineNoOpenRooms: 'Hozircha ochiq xonalar yo‘q — «Tez o‘yin»ni bosing yoki xona yarating.',
+  onlineJoinByCodeTitle: 'Xona kodi orqali kirish (CH-XXXX)',
+  onlineEnterRoomBtn: 'Kirish',
+  friendsTab: 'Do‘stlar',
+  yourFriendCodeLabel: 'Sizning do‘st kodingiz',
+  addFriendBtn: 'Do‘stlarga qo‘shish',
+  addedFriendBadge: 'Do‘stlarda ✓',
+  addFriendByCodeTitle: 'Kod orqali do‘st qo‘shish',
+  friendCodePlaceholder: 'CHUNO-XXXX-XXXX',
+  friendNameOptionalPlaceholder: 'Ism (ixtiyoriy)',
+  addFriendSubmitBtn: 'Qo‘shish',
+  friendErrInvalidCode: 'CHUNO-4A8K-9P2Q ko‘rinishidagi kod kiriting.',
+  friendErrSelf: 'O‘z do‘st kodingizni qo‘shib bo‘lmaydi.',
+  friendErrDuplicate: 'Bu o‘yinchi allaqachon do‘stlaringiz ro‘yxatida.',
+  friendsEmptyHint: 'Hozircha do‘stlar yo‘q. Do‘st kodingizni ulashing yoki o‘yin paytida raqibni qo‘shing.',
+  friendMatchesTogether: 'Birgalikdagi o‘yinlar',
+  friendInviteBtn: 'Xonaga taklif qilish',
+  friendInviteCopied: 'Taklif nusxalandi!',
+  friendJoinOpenRoomBtn: 'Qo‘shilish',
+  friendRemoveBtn: 'O‘chirish',
+  friendOnlineNow: 'Ochiq xonada kutmoqda',
+  updateAvailableTitle: 'Yangilanish mavjud',
+  updateNowBtn: 'Yangilash',
+  updateLaterBtn: 'Keyinroq',
+  yourTurn: 'Sizning yurishingiz',
+  opponentTurn: 'Raqib yurishi',
+  dealerName: 'Diler',
+  friendName: 'Raqib',
+  playingAsWhite: 'Oqlar',
+  playingAsBlack: 'Qoralar',
+  drawCard: 'Karta olish',
+  movesLeft: 'Qolgan yurishlar',
+  resurrectLeft: 'Tiklanadigan donalar',
+  checkWarning: 'SHOH',
+  pause: 'Pauza [Esc]',
+  resume: 'Davom etish',
+  restart: 'Qayta boshlash',
+  mainMenu: 'Bosh menyu',
+  playAgain: 'Yana o‘ynash',
+  pausedTitle: 'Pauza',
+  victory: 'G‘alaba',
+  defeat: 'Mag‘lubiyat',
+  drawResult: 'Durang',
+  matchTime: 'Vaqt',
+  offerDraw: 'Durang',
+  resign: 'Taslim bo‘lish',
+  close: 'Yopish',
+  howToPlayBtn: 'Qanday o‘ynaladi',
+  rulesTitle: 'ChUno qoidalari',
+  profileTitle: 'O‘yinchi profili',
+  wins: 'G‘alabalar',
+  losses: 'Mag‘lubiyatlar',
+  bestStreak: 'Eng uzun seriya',
+  audioSettingsTitle: 'Ovoz sozlamalari',
+  privacyTitle: 'Maxfiylik',
+  privacyLinkLabel: 'Maxfiylik siyosati',
+};
+
 export function getTranslations(lang: Language): Translations {
-  return lang === 'ru' ? RU : EN;
+  if (lang === 'ru') return RU;
+  if (lang === 'uz') return UZ;
+  return EN;
 }
 
 export function formatMatchTime(totalSeconds: number): string {

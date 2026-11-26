@@ -12,12 +12,44 @@ import {
   GraphicsQuality,
   LightPersonality,
 } from './deck/cardData';
+import { AvatarId, DEFAULT_AVATAR_ID, isValidAvatarId } from '../data/playerAvatars';
 import { Language } from './localization';
 import { MatchEndReason } from './match/matchEngine';
 
-export const APP_VERSION = '0.2.3';
-export const CURRENT_PROFILE_SCHEMA_VERSION = 2;
+export const APP_VERSION = '0.3.0';
+export const CURRENT_PROFILE_SCHEMA_VERSION = 4;
 export const CURRENT_AUDIO_DEFAULTS_VERSION = 4;
+export const NICKNAME_MIN_LEN = 2;
+export const NICKNAME_MAX_LEN = 18;
+
+export function normalizeFriendCode(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw.trim().toUpperCase();
+  return /^CHUNO-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(cleaned) ? cleaned : null;
+}
+
+export function getDefaultNickname(lang: Language = 'en'): string {
+  if (lang === 'ru') return 'Игрок';
+  if (lang === 'uz') return 'O‘yinchi';
+  return 'Player';
+}
+
+export interface NicknameValidationResult {
+  valid: boolean;
+  normalized: string;
+  error?: 'too_short' | 'too_long';
+}
+
+export function validateNickname(raw: string): NicknameValidationResult {
+  const normalized = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+  if (normalized.length < NICKNAME_MIN_LEN) {
+    return { valid: false, normalized, error: 'too_short' };
+  }
+  if (normalized.length > NICKNAME_MAX_LEN) {
+    return { valid: false, normalized: normalized.slice(0, NICKNAME_MAX_LEN), error: 'too_long' };
+  }
+  return { valid: true, normalized };
+}
 
 export function getPrivacyPolicyUrl(lang: Language | 'uz' = 'en'): string {
   const safeLang = lang === 'ru' ? 'ru' : lang === 'uz' ? 'uz' : 'en';
@@ -70,16 +102,23 @@ export interface PlayerStats {
 }
 
 export interface FriendEntry {
-  id: string;
-  displayName: string;
+  friendCode: string;
+  nickname: string;
+  avatarId: AvatarId;
   addedAt: string;
+  matchesTogether: number;
+  /** Optional legacy aliases preserved during migration */
+  id?: string;
+  displayName?: string;
 }
 
 export interface PlayerProfile {
   schemaVersion?: number;
   updatedAt?: string;
   playerId: string;
+  nickname: string;
   displayName: string;
+  avatarId: AvatarId;
   score: number;
   language: Language;
   muted: boolean;
@@ -127,7 +166,9 @@ export function createDefaultProfile(): PlayerProfile {
     schemaVersion: CURRENT_PROFILE_SCHEMA_VERSION,
     updatedAt: new Date(0).toISOString(),
     playerId: generatePlayerId(),
+    nickname: 'Player',
     displayName: 'Player',
+    avatarId: DEFAULT_AVATAR_ID,
     score: 0,
     language: 'en',
     muted: false,
@@ -352,15 +393,60 @@ export function normalizeAndMigrateProfile(
     }
   }
 
-  const cleanFriends: FriendEntry[] = Array.isArray(parsed.friends)
-    ? parsed.friends.filter(
-        (f): f is FriendEntry =>
-          Boolean(f) &&
-          typeof f === 'object' &&
-          typeof (f as FriendEntry).id === 'string' &&
-          typeof (f as FriendEntry).displayName === 'string',
-      )
-    : [];
+  const cleanFriendsMap = new Map<string, FriendEntry>();
+  if (Array.isArray(parsed.friends)) {
+    for (const raw of parsed.friends) {
+      if (!raw || typeof raw !== 'object') continue;
+      const obj = raw as Partial<FriendEntry>;
+      const rawKey = obj.friendCode ?? obj.id;
+      const normalizedCode = normalizeFriendCode(rawKey);
+      const code =
+        normalizedCode ??
+        (typeof rawKey === 'string' && rawKey.trim().length > 0 ? rawKey.trim() : null);
+      if (!code) continue;
+      const rawNick = typeof obj.nickname === 'string' && obj.nickname.trim().length > 0
+        ? obj.nickname.trim()
+        : typeof obj.displayName === 'string' && obj.displayName.trim().length > 0
+          ? obj.displayName.trim()
+          : code;
+      const nick = rawNick.replace(/\s+/g, ' ').slice(0, NICKNAME_MAX_LEN);
+      const av: AvatarId = isValidAvatarId(obj.avatarId) ? obj.avatarId : DEFAULT_AVATAR_ID;
+      const addedAt =
+        typeof obj.addedAt === 'string' && obj.addedAt.length > 0
+          ? obj.addedAt
+          : new Date().toISOString();
+      const matchesTogether = nonNegInt(obj.matchesTogether, 0);
+      cleanFriendsMap.set(code, {
+        friendCode: code,
+        nickname: nick,
+        avatarId: av,
+        addedAt,
+        matchesTogether,
+      });
+    }
+  }
+  const cleanFriends: FriendEntry[] = Array.from(cleanFriendsMap.values());
+
+  const nickTrim = typeof parsed.nickname === 'string' ? parsed.nickname.trim() : '';
+  const dispTrim = typeof parsed.displayName === 'string' ? parsed.displayName.trim() : '';
+  const rawNameSource =
+    nickTrim.length > 0 && nickTrim !== 'Player'
+      ? nickTrim
+      : dispTrim.length > 0 && dispTrim !== 'Player'
+        ? dispTrim
+        : nickTrim || dispTrim || def.nickname;
+  const cleanedName = rawNameSource.trim().replace(/\s+/g, ' ').slice(0, NICKNAME_MAX_LEN);
+  const resolvedNickname = cleanedName.length >= NICKNAME_MIN_LEN ? cleanedName : def.nickname;
+  const resolvedAvatarId: AvatarId = isValidAvatarId(parsed.avatarId)
+    ? parsed.avatarId
+    : DEFAULT_AVATAR_ID;
+  const resolvedLang: Language =
+    parsed.language === 'ru' ? 'ru' : parsed.language === 'uz' ? 'uz' : 'en';
+  const savedSchemaVer =
+    typeof parsed.schemaVersion === 'number' && Number.isFinite(parsed.schemaVersion)
+      ? parsed.schemaVersion
+      : 0;
+  const needsSchemaMigration = savedSchemaVer < CURRENT_PROFILE_SCHEMA_VERSION;
 
   const merged: PlayerProfile = {
     ...def,
@@ -374,12 +460,11 @@ export function normalizeAndMigrateProfile(
       typeof parsed.playerId === 'string' && parsed.playerId.trim().length > 0
         ? parsed.playerId.trim()
         : def.playerId,
-    displayName:
-      typeof parsed.displayName === 'string' && parsed.displayName.trim().length > 0
-        ? parsed.displayName.trim().slice(0, 20)
-        : def.displayName,
+    nickname: resolvedNickname,
+    displayName: resolvedNickname,
+    avatarId: resolvedAvatarId,
     score: nonNegInt(parsed.score),
-    language: parsed.language === 'ru' ? 'ru' : 'en',
+    language: resolvedLang,
     muted: typeof parsed.muted === 'boolean' ? parsed.muted : false,
     hasSeenTutorial: typeof parsed.hasSeenTutorial === 'boolean' ? parsed.hasSeenTutorial : false,
     hasSeenFirstMatchHints:
@@ -402,7 +487,7 @@ export function normalizeAndMigrateProfile(
     stats: mergedStats,
   };
 
-  return { profile: merged, needsSave: needsAudioDefaultsMigration };
+  return { profile: merged, needsSave: needsAudioDefaultsMigration || needsSchemaMigration };
 }
 
 function computeProfileRichness(p: PlayerProfile): number {
@@ -446,11 +531,21 @@ export function mergeProfiles(
     }
   }
 
-  // Union of friends by id
+  // Union of friends by friendCode (preserving earliest addedAt and max matchesTogether)
   const friendMap = new Map<string, FriendEntry>();
   for (const f of [...(secondary.friends ?? []), ...(primary.friends ?? [])]) {
-    if (f && typeof f.id === 'string') {
-      friendMap.set(f.id, f);
+    if (!f || !f.friendCode) continue;
+    const prev = friendMap.get(f.friendCode);
+    if (!prev) {
+      friendMap.set(f.friendCode, { ...f });
+    } else {
+      friendMap.set(f.friendCode, {
+        friendCode: f.friendCode,
+        nickname: f.nickname || prev.nickname,
+        avatarId: f.avatarId || prev.avatarId,
+        addedAt: prev.addedAt < f.addedAt ? prev.addedAt : f.addedAt,
+        matchesTogether: Math.max(prev.matchesTogether, f.matchesTogether),
+      });
     }
   }
 
@@ -494,12 +589,20 @@ export function mergeProfiles(
     fastestWinSec,
   };
 
-  const displayName =
-    primary.displayName !== 'Player'
-      ? primary.displayName
-      : secondary.displayName !== 'Player'
-        ? secondary.displayName
+  const primaryName = primary.nickname || primary.displayName || 'Player';
+  const secondaryName = secondary.nickname || secondary.displayName || 'Player';
+  const resolvedName =
+    primaryName !== 'Player'
+      ? primaryName
+      : secondaryName !== 'Player'
+        ? secondaryName
         : 'Player';
+  const resolvedAvatar: AvatarId =
+    primary.avatarId !== DEFAULT_AVATAR_ID
+      ? primary.avatarId
+      : secondary.avatarId !== DEFAULT_AVATAR_ID
+        ? secondary.avatarId
+        : DEFAULT_AVATAR_ID;
 
   const merged: PlayerProfile = {
     ...secondary,
@@ -512,7 +615,9 @@ export function mergeProfiles(
         : richnessB === 0 && richnessA > 0
           ? a.playerId
           : primary.playerId,
-    displayName,
+    nickname: resolvedName,
+    displayName: resolvedName,
+    avatarId: resolvedAvatar,
     score: Math.max(a.score, b.score),
     language: primary.language,
     muted: primary.muted,
@@ -803,6 +908,113 @@ export function recordMatchOutcomeDetailed(
   saveProfile(next);
 
   return { profile: next, scoreBreakdown, newlyUnlocked };
+}
+
+export function isFriend(profile: PlayerProfile, friendCode?: string | null): boolean {
+  const clean = normalizeFriendCode(friendCode);
+  if (!clean) return false;
+  return (profile.friends ?? []).some((f) => f.friendCode === clean);
+}
+
+export function addFriend(
+  profile: PlayerProfile,
+  input: { friendCode: string; nickname?: string; avatarId?: string },
+):
+  | { ok: true; profile: PlayerProfile; entry: FriendEntry; alreadyExists: boolean }
+  | { ok: false; error: 'invalid_code' | 'self' } {
+  const code = normalizeFriendCode(input.friendCode);
+  if (!code) return { ok: false, error: 'invalid_code' };
+  const myCode = normalizeFriendCode(profile.playerId);
+  if (myCode && code === myCode) return { ok: false, error: 'self' };
+
+  const current = profile.friends ?? [];
+  const existingIdx = current.findIndex((f) => f.friendCode === code);
+  const cleanNick =
+    typeof input.nickname === 'string' && input.nickname.trim().length > 0
+      ? input.nickname.trim().replace(/\s+/g, ' ').slice(0, NICKNAME_MAX_LEN)
+      : '';
+  const resolvedAvatar: AvatarId = isValidAvatarId(input.avatarId)
+    ? input.avatarId
+    : DEFAULT_AVATAR_ID;
+
+  if (existingIdx >= 0) {
+    const prev = current[existingIdx];
+    const updated: FriendEntry = {
+      ...prev,
+      nickname: cleanNick || prev.nickname,
+      avatarId: isValidAvatarId(input.avatarId) ? input.avatarId : prev.avatarId,
+    };
+    const nextFriends = [...current];
+    nextFriends[existingIdx] = updated;
+    return {
+      ok: true,
+      profile: { ...profile, friends: nextFriends },
+      entry: updated,
+      alreadyExists: true,
+    };
+  }
+
+  const entry: FriendEntry = {
+    friendCode: code,
+    nickname: cleanNick || code,
+    avatarId: resolvedAvatar,
+    addedAt: new Date().toISOString(),
+    matchesTogether: 0,
+  };
+  return {
+    ok: true,
+    profile: { ...profile, friends: [entry, ...current] },
+    entry,
+    alreadyExists: false,
+  };
+}
+
+export function removeFriend(profile: PlayerProfile, friendCode: string): PlayerProfile {
+  const code = normalizeFriendCode(friendCode);
+  if (!code) return profile;
+  const current = profile.friends ?? [];
+  const next = current.filter((f) => f.friendCode !== code);
+  if (next.length === current.length) return profile;
+  return { ...profile, friends: next };
+}
+
+export function syncFriendMatchPresence(
+  profile: PlayerProfile,
+  opponent: { friendCode?: string | null; nickname?: string; avatarId?: string },
+  incrementMatches = false,
+): PlayerProfile {
+  const code = normalizeFriendCode(opponent.friendCode);
+  if (!code) return profile;
+  const current = profile.friends ?? [];
+  const idx = current.findIndex((f) => f.friendCode === code);
+  if (idx < 0) return profile;
+
+  const prev = current[idx];
+  const nextNick =
+    typeof opponent.nickname === 'string' && opponent.nickname.trim().length > 0
+      ? opponent.nickname.trim().replace(/\s+/g, ' ').slice(0, NICKNAME_MAX_LEN)
+      : prev.nickname;
+  const nextAvatar: AvatarId = isValidAvatarId(opponent.avatarId)
+    ? opponent.avatarId
+    : prev.avatarId;
+  const nextMatches = prev.matchesTogether + (incrementMatches ? 1 : 0);
+
+  if (
+    nextNick === prev.nickname &&
+    nextAvatar === prev.avatarId &&
+    nextMatches === prev.matchesTogether
+  ) {
+    return profile;
+  }
+
+  const nextFriends = [...current];
+  nextFriends[idx] = {
+    ...prev,
+    nickname: nextNick,
+    avatarId: nextAvatar,
+    matchesTogether: nextMatches,
+  };
+  return { ...profile, friends: nextFriends };
 }
 
 export function recordMatchOutcome(

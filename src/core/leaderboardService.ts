@@ -1,4 +1,5 @@
 import { ACHIEVEMENTS } from './achievements';
+import { AvatarId } from '../data/playerAvatars';
 import { PlayerProfile, getAchievementProgressSnapshot } from './profileManager';
 
 export type LeaderboardCategory = 'score' | 'hard_wins' | 'win_streak' | 'coop_wins';
@@ -8,6 +9,7 @@ export interface LeaderboardEntry {
   playerId: string;
   displayName: string;
   avatarBadge: string;
+  avatarId?: AvatarId;
   score: number;
   totalWins: number;
   hardWins: number;
@@ -96,10 +98,17 @@ const HOUSE_BENCHMARKS: LeaderboardEntry[] = [
 export function profileToLeaderboardEntry(profile: PlayerProfile): LeaderboardEntry {
   const snap = getAchievementProgressSnapshot(profile);
   const unlockedCount = ACHIEVEMENTS.filter((a) => Boolean(profile.unlockedAchievements[a.id])).length;
+  const resolvedName =
+    profile.nickname && profile.nickname !== 'Player'
+      ? profile.nickname
+      : profile.displayName && profile.displayName !== 'Player'
+        ? profile.displayName
+        : profile.nickname || profile.displayName || 'Player';
   return {
     playerId: profile.playerId,
-    displayName: profile.displayName || 'Player',
+    displayName: resolvedName,
     avatarBadge: 'crown',
+    avatarId: profile.avatarId,
     score: profile.score,
     totalWins: snap.totalWins,
     hardWins: snap.survivalWins.hard,

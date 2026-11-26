@@ -11,8 +11,10 @@ import {
 } from '../core/deck/cardData';
 import { CoinSide, MatchActor } from '../core/match/matchEngine';
 import { soundManager } from '../audio/soundManager';
+import { AvatarId } from '../data/playerAvatars';
 import { assetFactory } from './assetFactory';
 import { CharacterRigController } from './characterRig';
+import { createPlayerAvatarRig } from './playerAvatar3D';
 import {
   HpMonitorRig,
   LightClockRig,
@@ -814,6 +816,7 @@ export class ChUnoSceneController {
       opponentHp: maxHp,
       elapsedSeconds: this.matchElapsedSeconds,
       suppressLossAnim: true,
+      opponentLabel: this.onlineOpponentName ?? 'DEALER',
     });
   }
 
@@ -972,12 +975,84 @@ export class ChUnoSceneController {
     }
 
     for (const [key, rig] of this.lightBundle.lightNpcRigs.entries()) {
-      rig.root.visible = key === personality;
+      rig.root.visible = !this.onlineOpponentRig && key === personality;
     }
 
-    if (this.mode === 'light') {
+    if (this.mode === 'light' && !this.onlineOpponentRig) {
       this.opponentRig = chosen;
       this.opponentRig.resetPose();
+    }
+  }
+
+  private onlineOpponentRig: CharacterRigController | null = null;
+  private onlineOpponentFillLight: THREE.PointLight | null = null;
+  private onlineOpponentAvatarId: AvatarId | null = null;
+  private onlineOpponentName: string | null = null;
+
+  /**
+   * Renders the online opponent's full animated 3D CharacterRigController (`playerAvatar3D.ts`)
+   * across the table during 1v1 multiplayer matches (with breathing, head sway, eye blinking,
+   * and IK hand reaches), or restores NPC/Dealer when returning to solo.
+   */
+  public setOnlineOpponentAvatar(avatarId: AvatarId | null, opponentName?: string | null): void {
+    const resolvedName = avatarId ? (opponentName?.trim() || null) : null;
+    this.onlineOpponentName = resolvedName;
+    if (this.hpMonitor) {
+      this.hpMonitor.setState({ opponentLabel: resolvedName ?? 'DEALER' });
+    }
+    if (avatarId === this.onlineOpponentAvatarId && Boolean(avatarId) === Boolean(this.onlineOpponentRig)) {
+      return;
+    }
+    this.onlineOpponentAvatarId = avatarId;
+
+    if (this.onlineOpponentRig) {
+      this.scene.remove(this.onlineOpponentRig.root);
+      this.onlineOpponentRig.dispose();
+      this.onlineOpponentRig = null;
+    }
+    if (this.onlineOpponentFillLight) {
+      this.scene.remove(this.onlineOpponentFillLight);
+      this.onlineOpponentFillLight = null;
+    }
+
+    if (avatarId) {
+      if (this.survivalBundle?.dealerRig) {
+        this.survivalBundle.dealerRig.root.visible = false;
+      }
+      if (this.lightBundle?.lightNpcRigs) {
+        for (const rig of this.lightBundle.lightNpcRigs.values()) {
+          rig.root.visible = false;
+        }
+      }
+      const rig = createPlayerAvatarRig(avatarId);
+      rig.root.position.set(0, -0.48, -1.88);
+      rig.root.scale.setScalar(1.32);
+      rig.resetPose();
+      this.scene.add(rig.root);
+      this.onlineOpponentRig = rig;
+      this.opponentRig = rig;
+
+      // Soft warm face-fill light only in dim Survival room (Classic meadow already has faceFillLight)
+      if (this.mode === 'survival') {
+        const fill = new THREE.PointLight(0xffdfb8, 1.05, 3.2, 1.6);
+        fill.position.set(0.18, 1.52, -0.82);
+        this.scene.add(fill);
+        this.onlineOpponentFillLight = fill;
+      }
+    } else {
+      if (this.survivalBundle?.dealerRig) {
+        this.survivalBundle.dealerRig.root.visible = true;
+      }
+      if (this.lightBundle?.lightNpcRigs) {
+        for (const [key, rig] of this.lightBundle.lightNpcRigs.entries()) {
+          rig.root.visible = key === this.personality;
+        }
+      }
+      if (this.mode === 'survival') {
+        this.opponentRig = this.survivalBundle?.dealerRig ?? null;
+      } else {
+        this.opponentRig = this.lightBundle?.lightNpcRigs?.get(this.personality) ?? null;
+      }
     }
   }
 
@@ -1963,6 +2038,7 @@ export class ChUnoSceneController {
         playerHp,
         opponentHp,
         elapsedSeconds: this.matchElapsedSeconds,
+        opponentLabel: this.onlineOpponentName ?? 'DEALER',
       });
     }
 
@@ -2157,17 +2233,19 @@ export class ChUnoSceneController {
       oMat.opacity = THREE.MathUtils.damp(oMat.opacity, targetOp, 10, dt);
     }
 
-    // 4. Floating Card reveal animation
+    // 4. Floating Card reveal animation (upright anti-glare angle facing camera cleanly)
     if (this.revealCardMesh && this.revealCardTimer > 0) {
       this.revealCardTimer -= dt;
       const prog = 1 - Math.max(0, this.revealCardTimer / this.revealCardDuration);
       if (prog < 0.35) {
         const k = prog / 0.35;
         this.revealCardMesh.position.lerpVectors(this.revealCardStart, this.revealCardEnd, k);
-        this.revealCardMesh.rotation.x = THREE.MathUtils.lerp(0, 0.92, k);
+        this.revealCardMesh.rotation.x = THREE.MathUtils.lerp(0, 1.18, k);
+        this.revealCardMesh.rotation.y = THREE.MathUtils.lerp(0, -0.06, k);
       } else if (prog < 0.85) {
         this.revealCardMesh.position.copy(this.revealCardEnd);
-        this.revealCardMesh.rotation.x = 0.92;
+        this.revealCardMesh.rotation.x = 1.18;
+        this.revealCardMesh.rotation.y = -0.06;
       } else {
         const k = (prog - 0.85) / 0.15;
         this.revealCardMesh.position.y -= dt * 1.8;
@@ -3069,6 +3147,15 @@ export class ChUnoSceneController {
     this.oppMoveAnim.active = false;
     this.oppReachAnim.active = false;
     this.oppCardAnim.active = false;
+    if (this.onlineOpponentRig) {
+      this.scene.remove(this.onlineOpponentRig.root);
+      this.onlineOpponentRig.dispose();
+      this.onlineOpponentRig = null;
+    }
+    if (this.onlineOpponentFillLight) {
+      this.scene.remove(this.onlineOpponentFillLight);
+      this.onlineOpponentFillLight = null;
+    }
     this.opponentRig = null;
 
     const disposeBundle = (bundle: ModeWorldBundle | null) => {

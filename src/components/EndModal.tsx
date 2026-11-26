@@ -1,9 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Lock } from 'lucide-react';
+import { Check, Crown, Lock, UserPlus } from 'lucide-react';
 import { MatchScoreBreakdown } from '../core/achievements';
 import { DialogueAudioMode, GameMode, GraphicsQuality } from '../core/deck/cardData';
 import { Language, formatMatchTime, getTranslations } from '../core/localization';
 import { MatchActor, MatchEndReason, MatchStats } from '../core/match/matchEngine';
+import {
+  OnlineMatchEndSummary,
+  SeatRole,
+  formatThinkTimeMs,
+} from '../core/onlineClient';
+import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
 
 interface EndModalProps {
   kind: 'paused' | 'gameover';
@@ -16,6 +22,13 @@ interface EndModalProps {
   drawOfferCooldownTurns: number;
   drawOfferLocked: boolean;
   scoreBreakdown?: MatchScoreBreakdown | null;
+  onlineSummary?: OnlineMatchEndSummary | null;
+  onlineYourSeat?: SeatRole;
+  onlineOpponentIsFriend?: boolean;
+  onAddOnlineFriend?: (friendCode: string, nickname: string, avatarId: string) => void;
+  onlineRematchRequestedByMe?: boolean;
+  onlineRematchRequestedByOpp?: boolean;
+  onRequestRematch?: () => void;
   endQuote: string | null;
   graphicsQuality: GraphicsQuality;
   showFps: boolean;
@@ -51,6 +64,13 @@ export const EndModal: React.FC<EndModalProps> = ({
   drawOfferCooldownTurns,
   drawOfferLocked,
   scoreBreakdown,
+  onlineSummary,
+  onlineYourSeat,
+  onlineOpponentIsFriend,
+  onAddOnlineFriend,
+  onlineRematchRequestedByMe,
+  onlineRematchRequestedByOpp,
+  onRequestRematch,
   endQuote,
   graphicsQuality,
   showFps,
@@ -404,6 +424,93 @@ export const EndModal: React.FC<EndModalProps> = ({
           </blockquote>
         )}
 
+        {onlineSummary ? (
+          <div className="space-y-3 mb-6" data-testid="online-end-summary">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {([onlineSummary.players.host, onlineSummary.players.guest] as const).map((p) => {
+                const isWinner = onlineSummary.winner === p.seat;
+                const isMe = onlineYourSeat === p.seat;
+                return (
+                  <div
+                    key={p.seat}
+                    data-end-player={p.seat}
+                    className={`p-3.5 rounded-xl border space-y-2 ${
+                      isWinner
+                        ? 'border-emerald-500/60 bg-emerald-500/10'
+                        : statBoxClass
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <PlayerAvatarPortrait avatarId={p.avatarId} size={40} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold truncate">{p.nickname}</span>
+                          {isWinner && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                        </div>
+                        <div className={`text-[10px] font-semibold ${isSurv ? 'text-stone-400' : 'text-stone-500'}`}>
+                          {isMe ? 'YOU' : p.seat.toUpperCase()}
+                          {isWinner ? ` · ${t.victory}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-stone-500/20 text-xs">
+                      <div>
+                        <div className={`text-[10px] ${isSurv ? 'text-stone-400' : 'text-stone-500'}`}>
+                          {t.onlineThinkTimeLabel}
+                        </div>
+                        <div className="font-mono-num text-base font-bold text-amber-500" data-testid={`end-think-${p.seat}`}>
+                          {formatThinkTimeMs(p.thinkTimeMs)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className={`text-[10px] ${isSurv ? 'text-stone-400' : 'text-stone-500'}`}>
+                          {t.onlineAvgTurnLabel}
+                        </div>
+                        <div className="font-mono-num text-sm font-semibold">
+                          {formatThinkTimeMs(p.avgTurnMs)} ({p.turnsCount})
+                        </div>
+                      </div>
+                    </div>
+                    {!isMe && p.friendCode && (
+                      <div className="pt-1.5 border-t border-stone-500/20">
+                        {onlineOpponentIsFriend ? (
+                          <span
+                            data-testid="end-friend-badge"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-500/15 border border-emerald-500/40 text-emerald-400"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>{t.addedFriendBadge}</span>
+                          </span>
+                        ) : (
+                          onAddOnlineFriend && (
+                            <button
+                              type="button"
+                              data-testid="end-add-friend"
+                              onClick={() => onAddOnlineFriend(p.friendCode!, p.nickname, p.avatarId)}
+                              className={`w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-bold border transition-colors cursor-pointer ${
+                                isSurv
+                                  ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 hover:bg-amber-600 hover:text-stone-950'
+                                  : 'border-stone-300 bg-white text-stone-800 hover:bg-stone-900 hover:text-white'
+                              }`}
+                            >
+                              <UserPlus className="w-3.5 h-3.5" />
+                              <span>{t.addFriendBtn}</span>
+                            </button>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {onlineRematchRequestedByOpp && !onlineRematchRequestedByMe && (
+              <div className="text-center text-xs font-semibold text-emerald-400">
+                {t.onlineRematchRequested}
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="grid grid-cols-3 gap-2.5 mb-6">
           <div className={`p-3 rounded-lg border ${statBoxClass}`}>
             <div className={`text-xs ${isSurv ? 'text-stone-400' : 'text-stone-500'}`}>
@@ -438,6 +545,7 @@ export const EndModal: React.FC<EndModalProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* Score Breakdown & Style Bonuses */}
         {scoreBreakdown && scoreBreakdown.totalAwarded > 0 && (
@@ -457,7 +565,7 @@ export const EndModal: React.FC<EndModalProps> = ({
             )}
             {scoreBreakdown.styleBonuses.map((bonus) => (
               <div key={bonus.key} className="flex items-center justify-between text-emerald-400">
-                <span>{bonus.label[language]}</span>
+                <span>{bonus.label[language === 'ru' ? 'ru' : 'en']}</span>
                 <span className="font-mono-num">+{bonus.points}</span>
               </div>
             ))}
@@ -474,14 +582,22 @@ export const EndModal: React.FC<EndModalProps> = ({
           <button
             type="button"
             data-start="true"
-            onClick={onRestart}
-            className={`flex-1 py-3 px-4 text-sm font-bold rounded-md whitespace-nowrap ${
-              isSurv
-                ? 'bg-amber-600 hover:bg-amber-500 text-stone-950'
-                : 'bg-stone-900 hover:bg-stone-800 text-white'
+            data-testid={onlineSummary ? 'online-rematch-btn' : 'solo-restart-btn'}
+            disabled={Boolean(onlineSummary && onlineRematchRequestedByMe)}
+            onClick={onlineSummary && onRequestRematch ? onRequestRematch : onRestart}
+            className={`flex-1 py-3 px-4 text-sm font-bold rounded-md whitespace-nowrap cursor-pointer ${
+              onlineSummary && onlineRematchRequestedByMe
+                ? 'bg-stone-700 text-stone-300 cursor-not-allowed'
+                : isSurv
+                  ? 'bg-amber-600 hover:bg-amber-500 text-stone-950'
+                  : 'bg-stone-900 hover:bg-stone-800 text-white'
             }`}
           >
-            {t.playAgain}
+            {onlineSummary
+              ? onlineRematchRequestedByMe
+                ? t.onlineRematchWaiting
+                : t.onlineRematch
+              : t.playAgain}
           </button>
           <button
             type="button"
