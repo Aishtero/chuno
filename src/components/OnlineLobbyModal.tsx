@@ -183,6 +183,8 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
     if (!errorCode) return null;
     if (errorCode === 'ROOM_NOT_FOUND') return t.onlineRoomNotFound;
     if (errorCode === 'ROOM_FULL') return t.onlineRoomFull;
+    if (errorCode === 'ROOM_IN_PROGRESS') return t.onlineRoomInProgress;
+    if (errorCode === 'SEAT_RESERVED') return t.onlineSeatReserved;
     return t.onlineServerOffline;
   }, [errorCode, localInputError, t]);
 

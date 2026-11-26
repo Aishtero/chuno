@@ -383,21 +383,23 @@ export const EndModal: React.FC<EndModalProps> = ({
   const title =
     winner === 'player' ? t.victory : winner === 'opponent' ? t.defeat : t.drawResult;
   const reasonLabel =
-    endReason === 'checkmate'
-      ? t.reasonCheckmate
-      : endReason === 'revolver_hp_zero'
-        ? t.reasonRevolver
-        : endReason === 'insufficient_material'
-          ? t.reasonInsufficient
-          : endReason === 'repetition'
-            ? t.reasonRepetition
-            : endReason === 'fifty_move'
-              ? t.reasonFiftyMove
-              : endReason === 'draw_agreed'
-                ? t.reasonDrawAgreed
-                : endReason === 'resignation'
-                  ? t.reasonResignation
-                  : t.reasonStalemate;
+    onlineSummary?.reason === 'disconnect_timeout' || onlineSummary?.reason === 'disconnect_forfeit'
+      ? t.onlineDisconnectForfeitReason
+      : endReason === 'checkmate'
+        ? t.reasonCheckmate
+        : endReason === 'revolver_hp_zero'
+          ? t.reasonRevolver
+          : endReason === 'insufficient_material'
+            ? t.reasonInsufficient
+            : endReason === 'repetition'
+              ? t.reasonRepetition
+              : endReason === 'fifty_move'
+                ? t.reasonFiftyMove
+                : endReason === 'draw_agreed'
+                  ? t.reasonDrawAgreed
+                  : endReason === 'resignation'
+                    ? t.reasonResignation
+                    : t.reasonStalemate;
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/75 p-4">

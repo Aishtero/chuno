@@ -27,6 +27,7 @@ import { BoardState } from './core/chess/boardState';
 import { OnlineSubMode } from './core/menuNavigation';
 import { resolveOnlineAutoCamera } from './core/onlineCamera';
 import {
+  ActiveOnlineSession,
   OnlineConnectionStatus,
   OnlineEmoteEvent,
   OnlineMatchEndSummary,
@@ -37,9 +38,13 @@ import {
   RoomErrorCode,
   RoomVisibility,
   StartingHp,
+  clearActiveOnlineSession,
   createOnlineRoom,
+  getOrCreatePlayerToken,
+  loadActiveOnlineSession,
   parseRoomCodeFromSearch,
   requestQuickMatch,
+  saveActiveOnlineSession,
 } from './core/onlineClient';
 import { isOnlineFeaturesEnabled } from './core/runtimePolicy';
 import {
@@ -219,6 +224,14 @@ export default function App() {
   const [onlineConnectionStatus, setOnlineConnectionStatus] = useState<OnlineConnectionStatus>('idle');
   const [onlineErrorCode, setOnlineErrorCode] = useState<RoomErrorCode | 'CONNECTION_ERROR' | null>(null);
   const [onlineEndSummary, setOnlineEndSummary] = useState<OnlineMatchEndSummary | null>(null);
+  const [pendingReconnectSession, setPendingReconnectSession] = useState<ActiveOnlineSession | null>(() =>
+    isOnlineFeaturesEnabled() ? loadActiveOnlineSession() : null,
+  );
+  const [reconnectingSavedMatch, setReconnectingSavedMatch] = useState(false);
+  const reconnectingSavedMatchRef = useRef(false);
+  const [opponentReconnectDeadline, setOpponentReconnectDeadline] = useState<number | null>(null);
+  const [opponentReconnectedNotice, setOpponentReconnectedNotice] = useState<string | null>(null);
+  const opponentReconnectedTimerRef = useRef<number | null>(null);
   const onlineClientRef = useRef<OnlineRoomClient | null>(null);
   const onlineRoomStateRef = useRef<OnlineRoomView | null>(null);
   onlineRoomStateRef.current = onlineRoomState;
@@ -330,6 +343,8 @@ export default function App() {
   const aiTimerRef = useRef<number | null>(null);
   const aiLastProgressRef = useRef<number>(Date.now());
   const isAnimatingRef = useRef(false);
+  const onlineCoinGuardUntilRef = useRef<number>(0);
+  const pendingOnlineSummaryRef = useRef<OnlineMatchEndSummary | null>(null);
 
   const clearAiTimer = useCallback(() => {
     if (aiTimerRef.current !== null) {
@@ -485,6 +500,8 @@ export default function App() {
     clearAiTimer();
     aiWorkerClient.cancelPending();
     aiBusyRef.current = false;
+    onlineCoinGuardUntilRef.current = 0;
+    pendingOnlineSummaryRef.current = null;
     dialogueManager.stop();
     for (const id of timeoutsRef.current) {
       clearTimeout(id);
@@ -659,6 +676,10 @@ export default function App() {
 
           if (evt.convertedFromResurrect) {
             setSpeechText(t.resurrectConverted);
+          } else if (evt.redrawReason === 'check_skip') {
+            setSpeechText(t.checkSkipRedraw);
+          } else if (evt.convertedFromCheckSkip) {
+            setSpeechText(t.checkSkipConverted);
           } else if (evt.card === 'BULLET') {
             speakEvent(
               evt.actor === 'player' ? 'bullet_drawn_by_player' : 'bullet_drawn_by_opponent',
@@ -1147,6 +1168,14 @@ export default function App() {
         setCamera('CAM_IDLE');
         runAITurnIfNeeded();
       }, 1100);
+    } else if (postPhase === 'AWAIT_DRAW_CARD' && postActor === 'player') {
+      // Check + Skip cancelled -> briefly show the discarded Skip card, then immediately let player draw again
+      schedule(() => {
+        isAnimatingRef.current = false;
+        if (screenRef.current === 'playing') {
+          setCamera('CAM_IDLE');
+        }
+      }, 950);
     } else {
       isAnimatingRef.current = false;
     }
@@ -1959,6 +1988,8 @@ export default function App() {
     const onlineState = onlineRoomStateRef.current;
     if (onlineState && onlineState.phase !== 'LOBBY' && onlineState.phase !== 'MATCH_OVER') {
       soundManager.playClick();
+      clearActiveOnlineSession();
+      setPendingReconnectSession(null);
       onlineClientRef.current?.resign();
       return;
     }
@@ -1989,6 +2020,7 @@ export default function App() {
       if (state.phase === 'LOBBY') {
         onlineMatchActiveRef.current = false;
         setOnlineEndSummary(null);
+        setOpponentReconnectDeadline(null);
         return;
       }
 
@@ -1997,6 +2029,27 @@ export default function App() {
       const mySlot = state.players[mySeat];
       const oppSlot = state.players[oppSeat];
       if (!mySlot || !oppSlot) return;
+
+      if (state.phase !== 'MATCH_OVER' && !summary) {
+        saveActiveOnlineSession({
+          roomCode: state.roomCode,
+          playerToken: onlineClientRef.current?.getCurrentPlayerToken() ?? getOrCreatePlayerToken(),
+          mode: state.mode,
+          opponentNickname: oppSlot.nickname,
+        });
+        setPendingReconnectSession(null);
+        setReconnectingSavedMatch(false);
+        reconnectingSavedMatchRef.current = false;
+      }
+
+      if (!oppSlot.connected && state.phase !== 'MATCH_OVER') {
+        const deadline =
+          oppSlot.reconnectDeadline ??
+          (oppSlot.disconnectedAt ? oppSlot.disconnectedAt + 90_000 : state.serverNow + 90_000);
+        setOpponentReconnectDeadline(deadline);
+      } else {
+        setOpponentReconnectDeadline(null);
+      }
 
       const targetGameMode: GameMode = state.mode === 'survival' ? 'survival' : 'light';
       const targetDiff: DifficultyLevel =
@@ -2008,6 +2061,7 @@ export default function App() {
       const oppAv: AvatarId = isValidAvatarId(oppSlot.avatarId) ? oppSlot.avatarId : 'strategist';
       if (justEnteredMatch) {
         onlineMatchActiveRef.current = true;
+        setShowGuide(false);
         setOnlineLobbySubMode(null);
         setOnlineEndSummary(null);
         setMode(targetGameMode);
@@ -2040,14 +2094,24 @@ export default function App() {
         });
       }
 
+      const coinEv = events?.find((ev) => ev.type === 'COIN_RESOLVED' && ev.actual && ev.guesser);
+      const coinShotFired = Boolean(coinEv && !coinEv.guessedRight);
+      const coinSeqActive = Boolean(coinEv) || performance.now() < onlineCoinGuardUntilRef.current;
+
+      // Hold back HP drop in HUD/CRT monitor until the exact revolver gunshot frame (matches solo choreography)
+      const prevMyHp = prevState?.players[mySeat]?.hp ?? mySlot.hp;
+      const prevOppHp = prevState?.players[oppSeat]?.hp ?? oppSlot.hp;
+      const displayMyHp = coinShotFired ? prevMyHp : mySlot.hp;
+      const displayOppHp = coinShotFired ? prevOppHp : oppSlot.hp;
+
       if (state.board) {
         const board = BoardState.fromSnapshot(state.board);
         sceneRef.current?.syncBoardState(
           board,
           mySlot.color,
           state.movesLeft,
-          mySlot.hp,
-          oppSlot.hp,
+          displayMyHp,
+          displayOppHp,
           state.deckCount,
         );
         if (state.phase === 'AWAIT_WILD_ACTION' && state.activeSeat === mySeat) {
@@ -2059,7 +2123,8 @@ export default function App() {
       }
 
       // Automatic camera transitions matching solo ChUno (draw -> top-down tactical for moves/wild/revive -> idle)
-      if (!justEnteredMatch) {
+      // Do NOT let trailing room_state packets interrupt an active 4.35s coin flip + 2.9s revolver sequence!
+      if (!justEnteredMatch && !coinSeqActive) {
         const camPlan = resolveOnlineAutoCamera({
           prevPhase: prevState?.phase ?? null,
           prevActiveSeat: prevState?.activeSeat ?? null,
@@ -2089,25 +2154,113 @@ export default function App() {
         }
       }
 
-      // Trigger 3D animations for key server events (draw, coin flip, revolver shot)
+      // Trigger 3D animations & audio for key server events (draw, Check+Skip, full 4.35s coin flip, revolver shot)
       if (events && events.length > 0) {
+        const t = getTranslations(languageRef.current);
         for (const ev of events) {
           if (ev.type === 'CARD_DRAWN' && ev.card) {
+            soundManager.playCardDraw();
             sceneRef.current?.triggerCardReveal(
               ev.card,
               ev.actor === mySeat ? 'player' : 'opponent',
             );
+            if (ev.redrawReason === 'check_skip') {
+              setSpeechText(t.checkSkipRedraw);
+            } else if (ev.convertedFromCheckSkip) {
+              setSpeechText(t.checkSkipConverted);
+            } else if (ev.convertedFromResurrect) {
+              setSpeechText(t.resurrectConverted);
+            }
           } else if (ev.type === 'PIECE_MOVED' && ev.move && ev.actor && ev.actor !== mySeat) {
             sceneRef.current?.triggerOpponentMove(ev.move.from, ev.move.to, Boolean(ev.captured));
+          } else if (ev.type === 'BOARD_REVERSED') {
+            soundManager.playReverse();
           } else if (ev.type === 'COIN_RESOLVED' && ev.actual && ev.guesser) {
             const guesserActor: MatchActor = ev.guesser === mySeat ? 'player' : 'opponent';
             const drawerActor: MatchActor = ev.drawer === mySeat ? 'player' : 'opponent';
+            const shotWillFire = !ev.guessedRight;
+            const seqDurMs = shotWillFire ? 7450 : 4950;
+            onlineCoinGuardUntilRef.current = performance.now() + seqDurMs;
+
+            if (onlineCameraTimerRef.current !== null) {
+              window.clearTimeout(onlineCameraTimerRef.current);
+              onlineCameraTimerRef.current = null;
+            }
+            soundManager.duckAmbient(true);
+            soundManager.playCoinPickup();
             sceneRef.current?.triggerCoinFlip(ev.actual, drawerActor);
-            if (!ev.guessedRight) {
-              window.setTimeout(() => {
+            setCamera('CAM_COIN_FLIP');
+
+            schedule(() => soundManager.playCoinPing(), 800);
+            schedule(() => soundManager.playCoinSlam(), 2350);
+            schedule(() => soundManager.playHeartbeat(), 2750);
+            schedule(() => soundManager.playHeartbeat(), 3100);
+
+            if (shotWillFire) {
+              const playerHit = guesserActor === 'player';
+              const cockDelay = playerHit ? 1100 : 850;
+              const shotDelay = playerHit ? 1600 : 1350;
+              const finalMyHp = mySlot.hp;
+              const finalOppHp = oppSlot.hp;
+              const snapBoard = state.board;
+              const snapColor = mySlot.color;
+              const snapMoves = state.movesLeft;
+              const snapDeck = state.deckCount;
+
+              schedule(() => {
+                if (!onlineMatchActiveRef.current) return;
+                soundManager.duckAmbient(false);
                 setCamera('CAM_REVOLVER');
+                soundManager.playRevolverPickup();
                 sceneRef.current?.triggerRevolverShot(guesserActor);
-              }, 1600);
+                schedule(() => {
+                  if (onlineMatchActiveRef.current) soundManager.playRevolverCock();
+                }, cockDelay);
+                schedule(() => {
+                  if (!onlineMatchActiveRef.current) return;
+                  soundManager.playRevolverShot(playerHit);
+                  setHud((prev) => ({ ...prev, playerHp: finalMyHp, opponentHp: finalOppHp }));
+                  if (snapBoard) {
+                    sceneRef.current?.syncBoardState(
+                      BoardState.fromSnapshot(snapBoard),
+                      snapColor,
+                      snapMoves,
+                      finalMyHp,
+                      finalOppHp,
+                      snapDeck,
+                    );
+                  }
+                  if (playerHit) {
+                    setHitFlash(true);
+                    setHitBlackout(true);
+                    schedule(() => setHitFlash(false), 200);
+                    schedule(() => setHitBlackout(false), 520);
+                  }
+                }, shotDelay);
+              }, 4350);
+
+              schedule(() => {
+                onlineCoinGuardUntilRef.current = 0;
+                const latest = onlineRoomStateRef.current;
+                const deferredSummary = pendingOnlineSummaryRef.current ?? latest?.endSummary ?? null;
+                if (latest?.phase === 'MATCH_OVER' || deferredSummary) {
+                  pendingOnlineSummaryRef.current = null;
+                  setOnlineEndSummary(deferredSummary);
+                  setScreen('gameover');
+                } else if (screenRef.current === 'playing' && onlineMatchActiveRef.current) {
+                  setCamera('CAM_IDLE');
+                }
+              }, 7350);
+            } else {
+              schedule(() => {
+                soundManager.duckAmbient(false);
+              }, 4350);
+              schedule(() => {
+                onlineCoinGuardUntilRef.current = 0;
+                if (screenRef.current === 'playing' && onlineMatchActiveRef.current) {
+                  setCamera('CAM_IDLE');
+                }
+              }, 4950);
             }
           }
         }
@@ -2127,8 +2280,8 @@ export default function App() {
         phase: state.phase as MatchPhase,
         activeActor,
         playerColor: mySlot.color,
-        playerHp: mySlot.hp,
-        opponentHp: oppSlot.hp,
+        playerHp: displayMyHp,
+        opponentHp: displayOppHp,
         maxHp: state.maxHp,
         currentCard: state.currentCard,
         movesLeft: state.movesLeft,
@@ -2139,7 +2292,9 @@ export default function App() {
         drawOfferCooldownTurns: 0,
         drawOfferLocked: false,
         winner: winnerActor,
-        endReason: (state.endReason === 'disconnect_forfeit' ? 'resignation' : state.endReason) as MatchEndReason | null,
+        endReason: (state.endReason === 'disconnect_forfeit' || state.endReason === 'disconnect_timeout'
+          ? 'resignation'
+          : state.endReason) as MatchEndReason | null,
         stats: {
           turnsPlayed: mySlot.turnsCount + oppSlot.turnsCount,
           movesMade: 0,
@@ -2153,11 +2308,21 @@ export default function App() {
       });
 
       if (state.phase === 'MATCH_OVER' || summary) {
-        setOnlineEndSummary(summary ?? state.endSummary);
-        setScreen('gameover');
+        clearActiveOnlineSession();
+        setPendingReconnectSession(null);
+        setOpponentReconnectDeadline(null);
+        setOpponentReconnectedNotice(null);
+        const resolvedSummary = summary ?? state.endSummary;
+        if (performance.now() < onlineCoinGuardUntilRef.current) {
+          // Defer Game Over modal until the 4.35s coin flip + 2.9s revolver shot finish playing!
+          pendingOnlineSummaryRef.current = resolvedSummary;
+        } else {
+          setOnlineEndSummary(resolvedSummary);
+          setScreen('gameover');
+        }
       }
     },
-    [setCamera],
+    [schedule, setCamera],
   );
 
   // Preload all 10 animated WebP emote blobs when entering a match for zero-latency frame-1 playback
@@ -2456,11 +2621,42 @@ export default function App() {
         onStatus: (st) => setOnlineConnectionStatus(st),
         onState: (state, events) => applyOnlineRoomState(state, events),
         onMatchEnded: (summary, state) => applyOnlineRoomState(state, undefined, summary),
+        onOpponentDisconnected: (ev) => {
+          setOpponentReconnectDeadline(ev.reconnectDeadline);
+          setOpponentReconnectedNotice(null);
+        },
+        onOpponentReconnected: () => {
+          setOpponentReconnectDeadline(null);
+          const msg = getTranslations(languageRef.current).onlineOpponentReconnectedNotice;
+          setOpponentReconnectedNotice(msg);
+          if (opponentReconnectedTimerRef.current !== null) {
+            window.clearTimeout(opponentReconnectedTimerRef.current);
+          }
+          opponentReconnectedTimerRef.current = window.setTimeout(() => {
+            opponentReconnectedTimerRef.current = null;
+            setOpponentReconnectedNotice(null);
+          }, 4000);
+        },
         onEmote: (ev) => handleReceiveOnlineEmote(ev),
         onSocialUpdate: () => {
           void refreshSocialStateRef.current();
         },
-        onError: (code) => setOnlineErrorCode(code),
+        onError: (code) => {
+          if (
+            code === 'ROOM_NOT_FOUND' ||
+            code === 'ROOM_FULL' ||
+            code === 'ROOM_IN_PROGRESS' ||
+            code === 'SEAT_RESERVED'
+          ) {
+            if (reconnectingSavedMatchRef.current) {
+              clearActiveOnlineSession();
+              setPendingReconnectSession(null);
+              setReconnectingSavedMatch(false);
+              reconnectingSavedMatchRef.current = false;
+            }
+          }
+          setOnlineErrorCode(code);
+        },
       });
     }
     return onlineClientRef.current;
@@ -2584,13 +2780,17 @@ export default function App() {
         handleOpenBlockedOnline(roomCode);
         return;
       }
+      const cleaned = roomCode.trim().toUpperCase();
       setOnlineErrorCode(null);
+      const saved = loadActiveOnlineSession();
+      const matchingToken = saved && saved.roomCode === cleaned ? saved.playerToken : undefined;
       const client = ensureOnlineClient();
       client.connect({
-        roomCode,
+        roomCode: cleaned,
         nickname: profile.nickname || profile.displayName,
         avatarId: profile.avatarId,
         friendCode: profile.playerId,
+        playerToken: matchingToken,
       });
     },
     [
@@ -2604,6 +2804,43 @@ export default function App() {
     ],
   );
   handleJoinOnlineRoomRef.current = handleJoinOnlineRoom;
+
+  const handleReconnectSavedMatch = useCallback(
+    (session: ActiveOnlineSession) => {
+      if (!onlineEnabled) {
+        handleOpenBlockedOnline(session.roomCode);
+        return;
+      }
+      setShowGuide(false);
+      setOnlineErrorCode(null);
+      setReconnectingSavedMatch(true);
+      reconnectingSavedMatchRef.current = true;
+      const client = ensureOnlineClient();
+      client.connect({
+        roomCode: session.roomCode,
+        nickname: profile.nickname || profile.displayName,
+        avatarId: profile.avatarId,
+        friendCode: profile.playerId,
+        playerToken: session.playerToken,
+      });
+    },
+    [
+      ensureOnlineClient,
+      handleOpenBlockedOnline,
+      onlineEnabled,
+      profile.avatarId,
+      profile.displayName,
+      profile.nickname,
+      profile.playerId,
+    ],
+  );
+
+  const handleDismissReconnectSession = useCallback(() => {
+    clearActiveOnlineSession();
+    setPendingReconnectSession(null);
+    setReconnectingSavedMatch(false);
+    reconnectingSavedMatchRef.current = false;
+  }, []);
 
   const handleSendFriendRequest = useCallback(
     async (
@@ -2837,6 +3074,9 @@ export default function App() {
     soundManager.playMusicTrack('menu');
     sceneRef.current?.clearCaptureBloodDecals();
     handleLeaveOnlineRoom();
+    if (onlineEnabled) {
+      setPendingReconnectSession(loadActiveOnlineSession());
+    }
     matchElapsedMsRef.current = 0;
     matchTimerAnchorRef.current = null;
     setElapsedSeconds(0);
@@ -3105,6 +3345,8 @@ export default function App() {
     const opp = onlineRoomState.players[oppSeat];
     if (!me || !opp) return null;
     return {
+      roomCode: onlineRoomState.roomCode,
+      connectionStatus: onlineConnectionStatus,
       opponentNickname: opp.nickname,
       opponentAvatarId: opp.avatarId,
       opponentFriendCode: opp.friendCode ?? null,
@@ -3126,6 +3368,8 @@ export default function App() {
       serverClockOffsetMs: onlineClockOffsetRef.current,
       timerPaused: onlineRoomState.timerPaused,
       opponentDisconnected: !opp.connected,
+      opponentReconnectDeadline: opp.reconnectDeadline ?? opponentReconnectDeadline,
+      opponentReconnectedNotice,
       canClaimDisconnectWin: onlineRoomState.canClaimDisconnectWin,
       drawOfferFromOpponent: Boolean(
         onlineRoomState.drawOfferFrom && onlineRoomState.drawOfferFrom !== mySeat,
@@ -3193,6 +3437,10 @@ export default function App() {
           incomingFriendRequestsCount={incomingFriendRequestsCount}
           profile={profile}
           guestStatus={guestStatus}
+          reconnectSession={pendingReconnectSession}
+          reconnectingMatch={reconnectingSavedMatch}
+          onReconnectMatch={handleReconnectSavedMatch}
+          onDismissReconnectSession={handleDismissReconnectSession}
           hasUpdateAvailable={updateIndicators.showRedDot}
           availableUpdateVersion={availableUpdate?.version ?? null}
           showUpdateToast={updateIndicators.showToast}

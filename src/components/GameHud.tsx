@@ -1,11 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BookOpen, Check, Clock, Eye, Flag, Handshake, HelpCircle, Lock, Music, Pause, SkipForward, UserPlus, Volume2, VolumeX, X } from 'lucide-react';
+import { BookOpen, Check, Clock, Copy, Eye, Flag, Handshake, HelpCircle, Loader2, Lock, Music, Pause, SkipForward, UserPlus, Volume2, VolumeX, WifiOff, X } from 'lucide-react';
 import { MusicTrackPreference, getMusicTrackLabel } from '../audio/musicManager';
+import { copyTextToClipboard } from '../core/clipboard';
 import { PieceColor, PieceType, PromotablePieceType } from '../core/chess/types';
 import { CardType, GameMode } from '../core/deck/cardData';
 import { Language, formatMatchTime, getTranslations } from '../core/localization';
 import { CoinSide, MatchActor, MatchPhase } from '../core/match/matchEngine';
-import { formatThinkTimeMs } from '../core/onlineClient';
+import {
+  OnlineConnectionStatus,
+  formatThinkTimeMs,
+  getReconnectRemainingSeconds,
+} from '../core/onlineClient';
 import { OpponentRelationStatus } from '../core/socialClient';
 import { AvatarId } from '../data/playerAvatars';
 import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
@@ -19,6 +24,8 @@ export function resolveHudOpponentHpLabel(
 }
 
 export interface OnlineHudInfo {
+  roomCode: string;
+  connectionStatus: OnlineConnectionStatus;
   opponentNickname: string;
   opponentAvatarId: string;
   opponentFriendCode?: string | null;
@@ -32,6 +39,8 @@ export interface OnlineHudInfo {
   serverClockOffsetMs: number;
   timerPaused: boolean;
   opponentDisconnected: boolean;
+  opponentReconnectDeadline: number | null;
+  opponentReconnectedNotice?: string | null;
   canClaimDisconnectWin: boolean;
   drawOfferFromOpponent: boolean;
   onAcceptDraw: () => void;
@@ -215,16 +224,38 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
   const isSurv = mode === 'survival';
   const isPlayerTurn = activeActor === 'player';
   const [confirmingResign, setConfirmingResign] = useState(false);
+  const [copiedRoomCode, setCopiedRoomCode] = useState(false);
   const [tickNow, setTickNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!onlineHud || onlineHud.timerPaused || onlineHud.turnStartedAt === null || phase === 'MATCH_OVER') {
+    const shouldTickTurn =
+      Boolean(onlineHud && !onlineHud.timerPaused && onlineHud.turnStartedAt !== null && phase !== 'MATCH_OVER');
+    const shouldTickReconnect = Boolean(
+      onlineHud && onlineHud.opponentDisconnected && phase !== 'MATCH_OVER',
+    );
+    if (!shouldTickTurn && !shouldTickReconnect) {
       return;
     }
     setTickNow(Date.now());
     const id = window.setInterval(() => setTickNow(Date.now()), 250);
     return () => window.clearInterval(id);
   }, [onlineHud, phase]);
+
+  const reconnectRemainingSec = onlineHud?.opponentDisconnected
+    ? getReconnectRemainingSeconds(
+        onlineHud.opponentReconnectDeadline,
+        onlineHud.serverClockOffsetMs,
+        tickNow,
+      )
+    : 0;
+
+  const handleCopyHudRoomCode = () => {
+    if (!onlineHud?.roomCode) return;
+    void copyTextToClipboard(onlineHud.roomCode).then(() => {
+      setCopiedRoomCode(true);
+      window.setTimeout(() => setCopiedRoomCode(false), 1800);
+    });
+  };
 
   const liveElapsedTurnMs =
     onlineHud && !onlineHud.timerPaused && onlineHud.turnStartedAt !== null && phase !== 'MATCH_OVER'
@@ -414,18 +445,83 @@ export const GameHud: React.FC<GameHudProps> = React.memo(({
             </div>
           )}
 
-          {onlineHud?.opponentDisconnected && (
-            <div className="mt-2 px-2.5 py-1.5 rounded border border-amber-500/40 bg-amber-500/10 text-[11px] flex items-center justify-between gap-2">
-              <span className="text-amber-300">{t.onlineDisconnectPaused}</span>
-              {onlineHud.canClaimDisconnectWin && (
-                <button
-                  type="button"
-                  onClick={onlineHud.onClaimDisconnectWin}
-                  className="px-2 py-0.5 rounded bg-amber-600 text-stone-950 font-bold whitespace-nowrap cursor-pointer"
-                >
-                  {t.onlineClaimDisconnectWin}
-                </button>
-              )}
+          {onlineHud?.connectionStatus === 'reconnecting' && phase !== 'MATCH_OVER' && (
+            <div
+              data-testid="self-reconnecting-banner"
+              className="mt-2 px-2.5 py-1.5 rounded border border-amber-500/50 bg-amber-500/15 text-[11px] font-semibold flex items-center gap-2 text-amber-300"
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              <span>{t.onlineReconnectingOverlay}</span>
+            </div>
+          )}
+
+          {onlineHud?.opponentDisconnected && phase !== 'MATCH_OVER' && (
+            <div
+              data-testid="opponent-disconnect-banner"
+              className={`mt-2 px-2.5 py-2 rounded border text-[11px] space-y-1.5 ${
+                isSurv
+                  ? 'border-amber-500/50 bg-amber-500/12 text-amber-200'
+                  : 'border-amber-500/60 bg-amber-50 text-amber-950'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <WifiOff className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span>
+                    {t.onlineOpponentDisconnectedBanner} (
+                    <span data-testid="opponent-disconnect-countdown" className="font-mono-num font-bold">
+                      {reconnectRemainingSec}
+                      {language === 'ru' ? 'с' : 's'}
+                    </span>
+                    )
+                  </span>
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="opacity-75">{t.onlineRoomCodeLabel}:</span>
+                  <span
+                    data-testid="hud-reconnect-room-code"
+                    className="font-mono-num font-bold tracking-wider px-1.5 py-0.5 rounded bg-black/20"
+                  >
+                    {onlineHud.roomCode}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="hud-copy-room-code"
+                    onClick={handleCopyHudRoomCode}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold border transition-colors cursor-pointer ${
+                      copiedRoomCode
+                        ? 'border-emerald-500 bg-emerald-600 text-white'
+                        : isSurv
+                          ? 'border-amber-500/50 bg-stone-900 text-amber-300 hover:bg-amber-600 hover:text-stone-950'
+                          : 'border-amber-500/60 bg-white text-amber-950 hover:bg-amber-100'
+                    }`}
+                  >
+                    {copiedRoomCode ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedRoomCode ? t.onlineCodeCopied : t.onlineCopyCode}</span>
+                  </button>
+                </div>
+                {onlineHud.canClaimDisconnectWin && (
+                  <button
+                    type="button"
+                    onClick={onlineHud.onClaimDisconnectWin}
+                    className="px-2 py-0.5 rounded bg-amber-600 text-stone-950 font-bold whitespace-nowrap cursor-pointer"
+                  >
+                    {t.onlineClaimDisconnectWin}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {onlineHud?.opponentReconnectedNotice && !onlineHud.opponentDisconnected && phase !== 'MATCH_OVER' && (
+            <div
+              data-testid="opponent-reconnected-toast"
+              className="mt-2 px-2.5 py-1.5 rounded border border-emerald-500/50 bg-emerald-500/15 text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5"
+            >
+              <Check className="w-3.5 h-3.5 shrink-0" />
+              <span>{onlineHud.opponentReconnectedNotice}</span>
             </div>
           )}
 

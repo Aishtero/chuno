@@ -60,6 +60,8 @@ export interface Translations {
   onlineServerOffline: string;
   onlineRoomNotFound: string;
   onlineRoomFull: string;
+  onlineRoomInProgress: string;
+  onlineSeatReserved: string;
   onlineWaitingGuest: string;
   onlineReady: string;
   onlineNotReady: string;
@@ -73,6 +75,12 @@ export interface Translations {
   onlineDisconnectPaused: string;
   onlineClaimDisconnectWin: string;
   onlineDisconnectForfeitReason: string;
+  onlineReconnectBannerTitle: string;
+  onlineReconnectBannerBtn: string;
+  onlineReconnectDismissBtn: string;
+  onlineReconnectingOverlay: string;
+  onlineOpponentDisconnectedBanner: string;
+  onlineOpponentReconnectedNotice: string;
   onlineVisibilityLabel: string;
   onlinePublicLabel: string;
   onlinePrivateLabel: string;
@@ -167,6 +175,8 @@ export interface Translations {
   clickDeckPrompt: string;
   streakBrokenCheck: string;
   resurrectConverted: string;
+  checkSkipRedraw: string;
+  checkSkipConverted: string;
   stalemateReset: string;
   rulesTitle: string;
   profileTitle: string;
@@ -278,6 +288,8 @@ const EN: Translations = {
   onlineServerOffline: 'Multiplayer server unreachable. Start chuno-mp-server on port 8787.',
   onlineRoomNotFound: 'Room not found. Check the code and try again.',
   onlineRoomFull: 'This room already has 2 players.',
+  onlineRoomInProgress: 'Match is already in progress in this room.',
+  onlineSeatReserved: 'Seat is reserved for a reconnecting player.',
   onlineWaitingGuest: 'Waiting for opponent to join...',
   onlineReady: 'Ready',
   onlineNotReady: 'Not Ready',
@@ -288,9 +300,15 @@ const EN: Translations = {
   onlineRematchRequested: 'Opponent wants a rematch!',
   onlineThinkTimeLabel: 'Think Time',
   onlineAvgTurnLabel: 'Avg / turn',
-  onlineDisconnectPaused: 'Opponent disconnected · Timer paused (60s reconnect window)',
+  onlineDisconnectPaused: 'Opponent disconnected · Timer paused (90s reconnect window)',
   onlineClaimDisconnectWin: 'Claim Win (Disconnect)',
-  onlineDisconnectForfeitReason: 'Opponent disconnected for over 60s',
+  onlineDisconnectForfeitReason: 'Opponent did not reconnect within 90s',
+  onlineReconnectBannerTitle: 'Active online match',
+  onlineReconnectBannerBtn: 'Reconnect to Match',
+  onlineReconnectDismissBtn: 'Hide',
+  onlineReconnectingOverlay: 'Restoring connection...',
+  onlineOpponentDisconnectedBanner: 'Opponent disconnected — waiting for reconnect',
+  onlineOpponentReconnectedNotice: 'Opponent reconnected!',
   onlineVisibilityLabel: 'Room Visibility',
   onlinePublicLabel: 'Open (visible to all)',
   onlinePrivateLabel: 'Private (code only)',
@@ -385,6 +403,8 @@ const EN: Translations = {
   clickDeckPrompt: 'Click deck or press [Space]',
   streakBrokenCheck: 'Check! Streak interrupted.',
   resurrectConverted: 'No valid resurrection — converted to 1 move.',
+  checkSkipRedraw: 'Check! Skip cancelled — draw again.',
+  checkSkipConverted: 'Check! Skip converted to 1 move.',
   stalemateReset: 'Stalemate! Board resets for a new round.',
   rulesTitle: 'How to Play ChUno',
   profileTitle: 'Career Profile',
@@ -549,6 +569,8 @@ const RU: Translations = {
   onlineServerOffline: 'Сервер мультиплеера недоступен. Запустите chuno-mp-server на порту 8787.',
   onlineRoomNotFound: 'Комната не найдена. Проверьте код.',
   onlineRoomFull: 'В этой комнате уже 2 игрока.',
+  onlineRoomInProgress: 'В этой комнате уже идёт партия.',
+  onlineSeatReserved: 'Место зарезервировано для переподключающегося игрока.',
   onlineWaitingGuest: 'Ожидание второго игрока...',
   onlineReady: 'Готов',
   onlineNotReady: 'Не готов',
@@ -559,9 +581,15 @@ const RU: Translations = {
   onlineRematchRequested: 'Соперник предлагает реванш!',
   onlineThinkTimeLabel: 'Время на ходы',
   onlineAvgTurnLabel: 'Среднее / ход',
-  onlineDisconnectPaused: 'Соперник отключился · Таймер на паузе (60 сек на возврат)',
+  onlineDisconnectPaused: 'Соперник отключился · Таймер на паузе (90 сек на возврат)',
   onlineClaimDisconnectWin: 'Засчитать победу (выход)',
-  onlineDisconnectForfeitReason: 'Соперник не вернулся за 60 сек',
+  onlineDisconnectForfeitReason: 'Соперник не вернулся за 90 сек',
+  onlineReconnectBannerTitle: 'Незавершённый онлайн-матч',
+  onlineReconnectBannerBtn: 'Вернуться в матч',
+  onlineReconnectDismissBtn: 'Скрыть',
+  onlineReconnectingOverlay: 'Восстановление соединения...',
+  onlineOpponentDisconnectedBanner: 'Соперник отключился — ожидание переподключения',
+  onlineOpponentReconnectedNotice: 'Соперник вернулся в игру!',
   onlineVisibilityLabel: 'Видимость комнаты',
   onlinePublicLabel: 'Открытая (видна всем)',
   onlinePrivateLabel: 'Приватная (только по коду)',
@@ -656,6 +684,8 @@ const RU: Translations = {
   clickDeckPrompt: 'Клик по колоде или [Space]',
   streakBrokenCheck: 'Шах! Серия ходов прервана.',
   resurrectConverted: 'Нет фигур или клеток для возврата — дан 1 обычный ход.',
+  checkSkipRedraw: 'Шах! Карта «Пропуск» отменена — тяните карту снова.',
+  checkSkipConverted: 'Шах! Карта «Пропуск» заменена на 1 обычный ход.',
   stalemateReset: 'Пат! Доска сброшена на новый раунд без потери HP.',
   rulesTitle: 'Правила ChUno',
   profileTitle: 'Профиль игрока',
@@ -821,6 +851,8 @@ const UZ: Translations = {
   onlineServerOffline: 'Tarmoq serveri ishlamayapti (chuno-mp-server, 8787-port).',
   onlineRoomNotFound: 'Xona topilmadi. Kodni tekshiring.',
   onlineRoomFull: 'Bu xonada allaqachon 2 ta o‘yinchi bor.',
+  onlineRoomInProgress: 'Bu xonada o‘yin allaqachon davom etmoqda.',
+  onlineSeatReserved: 'Bu o‘rin qayta ulanayotgan o‘yinchi uchun band.',
   onlineWaitingGuest: 'Ikkinchi o‘yinchi kutilmoqda...',
   onlineReady: 'Tayyor',
   onlineNotReady: 'Tayyor emas',
@@ -831,9 +863,15 @@ const UZ: Translations = {
   onlineRematchRequested: 'Raqib revansh taklif qildi!',
   onlineThinkTimeLabel: 'Yurish vaqti',
   onlineAvgTurnLabel: 'O‘rtacha / yurish',
-  onlineDisconnectPaused: 'Raqib uzildi · Taymer pauzada (60 soniya)',
+  onlineDisconnectPaused: 'Raqib uzildi · Taymer pauzada (90 soniya)',
   onlineClaimDisconnectWin: 'G‘alabani olish',
-  onlineDisconnectForfeitReason: 'Raqib 60 soniyada qaytmadi',
+  onlineDisconnectForfeitReason: 'Raqib 90 soniyada qaytmadi',
+  onlineReconnectBannerTitle: 'Faol onlayn o‘yin',
+  onlineReconnectBannerBtn: 'O‘yinga qaytish',
+  onlineReconnectDismissBtn: 'Yashirish',
+  onlineReconnectingOverlay: 'Aloqa tiklanmoqda...',
+  onlineOpponentDisconnectedBanner: 'Raqib uzildi — qayta ulanish kutilmoqda',
+  onlineOpponentReconnectedNotice: 'Raqib o‘yinga qaytdi!',
   onlineVisibilityLabel: 'Xona ko‘rinishi',
   onlinePublicLabel: 'Ochiq (hammaga ko‘rinadi)',
   onlinePrivateLabel: 'Yopiq (faqat kod bilan)',
@@ -878,6 +916,8 @@ const UZ: Translations = {
   movesLeft: 'Qolgan yurishlar',
   resurrectLeft: 'Tiklanadigan donalar',
   checkWarning: 'SHOH',
+  checkSkipRedraw: 'Shoh! «O‘tkazish» bekor qilindi — yana karta torting.',
+  checkSkipConverted: 'Shoh! «O‘tkazish» 1 ta oddiy yurishga almashtirildi.',
   pause: 'Pauza [Esc]',
   resume: 'Davom etish',
   restart: 'Qayta boshlash',

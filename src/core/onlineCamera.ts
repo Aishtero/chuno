@@ -41,7 +41,7 @@ export function resolveOnlineAutoCamera(input: {
     return {
       immediatePreset: 'CAM_COIN_FLIP',
       delayedPreset: nextPhase === 'MATCH_OVER' ? undefined : 'CAM_IDLE',
-      delayMs: shotFired ? 5200 : 3400,
+      delayMs: shotFired ? 7400 : 4950,
     };
   }
 

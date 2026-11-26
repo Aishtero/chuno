@@ -17,7 +17,7 @@ import { MusicTrackPreference, isValidMusicTrackPreference } from '../audio/musi
 import { Language } from './localization';
 import { MatchEndReason } from './match/matchEngine';
 
-export const APP_VERSION = '0.4.1';
+export const APP_VERSION = '0.4.2';
 export const CURRENT_PROFILE_SCHEMA_VERSION = 4;
 export const CURRENT_AUDIO_DEFAULTS_VERSION = 4;
 export const NICKNAME_MIN_LEN = 2;

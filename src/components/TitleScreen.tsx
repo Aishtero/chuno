@@ -20,6 +20,7 @@ import { ACHIEVEMENTS } from '../core/achievements';
 import { DifficultyLevel, GameMode, LightPersonality } from '../core/deck/cardData';
 import { Language, getTranslations } from '../core/localization';
 import { MainMenuTab, OnlineSubMode } from '../core/menuNavigation';
+import { ActiveOnlineSession } from '../core/onlineClient';
 import { APP_VERSION, PlayerProfile } from '../core/profileManager';
 import { WebGuestGateStatus } from '../core/webGuestGate';
 import { PlayerAvatarPortrait } from './PlayerAvatarPortrait';
@@ -35,6 +36,10 @@ interface TitleScreenProps {
   incomingFriendRequestsCount: number;
   profile: PlayerProfile;
   guestStatus: WebGuestGateStatus;
+  reconnectSession?: ActiveOnlineSession | null;
+  reconnectingMatch?: boolean;
+  onReconnectMatch?: (session: ActiveOnlineSession) => void;
+  onDismissReconnectSession?: () => void;
   hasUpdateAvailable?: boolean;
   availableUpdateVersion?: string | null;
   showUpdateToast?: boolean;
@@ -67,6 +72,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
   incomingFriendRequestsCount,
   profile,
   guestStatus,
+  reconnectSession,
+  reconnectingMatch,
+  onReconnectMatch,
+  onDismissReconnectSession,
   hasUpdateAvailable,
   availableUpdateVersion,
   showUpdateToast,
@@ -345,11 +354,72 @@ export const TitleScreen: React.FC<TitleScreenProps> = React.memo(({
         </div>
       </header>
 
+      {/* Reconnect Banner for unfinished online match (< 2 min) */}
+      {onlineEnabled && reconnectSession && onReconnectMatch && (
+        <div
+          data-testid="title-reconnect-banner"
+          className={`pointer-events-auto mx-auto mt-2 w-full max-w-xl rounded-xl border px-3.5 py-2.5 shadow-xl flex flex-wrap items-center justify-between gap-2.5 ${
+            isSurv
+              ? 'border-amber-500/60 bg-stone-950/92 text-stone-100'
+              : 'border-emerald-600/50 bg-white/95 text-stone-900'
+          }`}
+        >
+          <div className="min-w-0 flex items-center gap-2.5">
+            <span className="relative flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-xs font-bold truncate">
+                {t.onlineReconnectBannerTitle} ·{' '}
+                <span className="font-mono-num text-amber-500">{reconnectSession.roomCode}</span>
+              </div>
+              <div className={`text-[11px] truncate ${isSurv ? 'text-stone-400' : 'text-stone-600'}`}>
+                vs {reconnectSession.opponentNickname}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              data-testid="title-reconnect-btn"
+              disabled={Boolean(reconnectingMatch)}
+              onClick={() => clickThen(() => onReconnectMatch(reconnectSession))}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
+                isSurv
+                  ? 'bg-amber-500 hover:bg-amber-400 text-stone-950'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+              }`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${reconnectingMatch ? 'animate-spin' : ''}`} />
+              <span>
+                {t.onlineReconnectBannerBtn} ({reconnectSession.roomCode})
+              </span>
+            </button>
+            {onDismissReconnectSession && (
+              <button
+                type="button"
+                data-testid="title-reconnect-dismiss"
+                onClick={() => clickThen(onDismissReconnectSession)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                  isSurv
+                    ? 'border-stone-700 text-stone-300 hover:bg-stone-900'
+                    : 'border-stone-300 text-stone-700 hover:bg-stone-100'
+                }`}
+              >
+                {t.onlineReconnectDismissBtn}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Free-standing atmospheric left column over the 3D scene */}
       <main className="max-w-sm md:max-w-md pointer-events-auto my-auto">
         <div className="mb-7">
           <h1
-            className={`font-display text-6xl md:text-7xl font-bold tracking-tight leading-none select-none ${
+            data-testid="title-brand-logo"
+            className={`font-display text-6xl md:text-7xl font-bold tracking-tight leading-none select-none pointer-events-none ${
               isSurv ? 'text-[#ede6d8]' : 'text-[#1c2620]'
             }`}
           >

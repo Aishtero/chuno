@@ -1066,7 +1066,7 @@ test('mergeProfiles, exportProfileToJson, and parseAndValidateImportedProfile pr
 
 test('v0.2.3 profile migration preserves v0.2.2 achievements, stats, and settings without reset', async () => {
   const { normalizeAndMigrateProfile, mergeProfiles, APP_VERSION, getPrivacyPolicyUrl } = await import('./profileManager');
-  assert.equal(APP_VERSION, '0.4.1');
+  assert.equal(APP_VERSION, '0.4.2');
 
   const v022Profile = {
     schemaVersion: 2,
@@ -1202,8 +1202,8 @@ test('v0.2.3 webGuestGate resets cleanly on version bump from 0.2.2 and stays di
   recordWebGuestMatchCompleted({ appVersion: '0.2.2', storage, isTauri: false });
   assert.equal(getWebGuestStatus({ appVersion: '0.2.2', storage, isTauri: false }).isLocked, true);
 
-  // Default APP_VERSION is now 0.2.3 -> fresh 0/3 guest allowance
-  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.4.1');
+  // Default APP_VERSION is now 0.4.2 -> fresh 0/3 guest allowance
+  assert.equal(getWebGuestStorageKey(), 'chuno_web_guest_v0.4.2');
   const v023Web = getWebGuestStatus({ storage, isTauri: false });
   assert.equal(v023Web.isGuestMode, true);
   assert.equal(v023Web.matchesPlayed, 0);
@@ -1938,4 +1938,198 @@ test('Dealer bundled RU/EN voice clips resolve accurately, verify OggS files on 
   assert.equal(computeEffectiveBundledVoiceVolume(0), 0);
   assert.ok(computeEffectiveBundledVoiceVolume(0.6) >= 0.6 && computeEffectiveBundledVoiceVolume(0.6) <= 0.72);
   assert.equal(computeEffectiveBundledVoiceVolume(1), 1);
+});
+
+test('Offline Check + Skip rule cancels Skip so player or AI in check redraws without losing turn (plus all-Skip fallback)', async () => {
+  const { getTranslations } = await import('./localization');
+  // Localized Check+Skip notifications exist in EN, RU, and UZ
+  assert.ok(getTranslations('en').checkSkipRedraw.length > 5);
+  assert.ok(getTranslations('ru').checkSkipRedraw.length > 5);
+  assert.ok(getTranslations('uz').checkSkipRedraw.length > 5);
+
+  // Case 1: Player (White) in check draws SKIP -> discarded, stays player AWAIT_DRAW_CARD, next draw NUM_1 works
+  const m1 = new MatchEngine({ mode: 'survival', difficulty: 'medium', personality: 'calm', rng: () => 0.5 });
+  m1.board.squares.fill(null);
+  m1.board.castlingRights = { wK: false, wQ: false, bK: false, bQ: false };
+  m1.board.squares[toSq(0, 4)] = { id: 1, type: 'king', color: 'white', hasMoved: true };
+  m1.board.squares[toSq(7, 4)] = { id: 2, type: 'rook', color: 'black', hasMoved: true };
+  m1.board.squares[toSq(7, 0)] = { id: 3, type: 'king', color: 'black', hasMoved: true };
+  m1.activeActor = 'player';
+  m1.deck.drawPile = ['NUM_1', 'SKIP'];
+  m1.deck.discardPile = [];
+
+  const ev1 = m1.drawCard();
+  assert.equal(ev1.length, 1);
+  assert.equal(ev1[0].type, 'CARD_DRAWN');
+  if (ev1[0].type === 'CARD_DRAWN') {
+    assert.equal(ev1[0].card, 'SKIP');
+    assert.equal(ev1[0].redrawReason, 'check_skip');
+  }
+  assert.equal(m1.activeActor, 'player');
+  assert.equal(m1.phase, 'AWAIT_DRAW_CARD');
+
+  const ev2 = m1.drawCard();
+  assert.equal(ev2[0].type, 'CARD_DRAWN');
+  assert.equal(m1.activeActor, 'player');
+  assert.equal(m1.phase, 'PLAYER_MOVE_LOOP');
+  assert.equal(m1.movesLeft, 1);
+
+  // Case 2: Opponent (AI Black) in check draws SKIP -> stays opponent AWAIT_DRAW_CARD for automatic redraw
+  const m2 = new MatchEngine({ mode: 'light', difficulty: 'medium', personality: 'calm', rng: () => 0.5 });
+  m2.board.squares.fill(null);
+  m2.board.castlingRights = { wK: false, wQ: false, bK: false, bQ: false };
+  m2.board.squares[toSq(7, 4)] = { id: 1, type: 'king', color: 'black', hasMoved: true };
+  m2.board.squares[toSq(0, 4)] = { id: 2, type: 'rook', color: 'white', hasMoved: true };
+  m2.board.squares[toSq(0, 0)] = { id: 3, type: 'king', color: 'white', hasMoved: true };
+  m2.activeActor = 'opponent';
+  m2.deck.drawPile = ['NUM_2', 'SKIP'];
+  m2.deck.discardPile = [];
+
+  const aiEv = m2.drawCard();
+  assert.equal(aiEv[0].type, 'CARD_DRAWN');
+  if (aiEv[0].type === 'CARD_DRAWN') {
+    assert.equal(aiEv[0].redrawReason, 'check_skip');
+  }
+  assert.equal(m2.activeActor, 'opponent');
+  assert.equal(m2.phase, 'AWAIT_DRAW_CARD');
+
+  // Case 3: Infinite-loop safeguard when only SKIP cards exist -> converts to 1 move
+  const m3 = new MatchEngine({ mode: 'survival', difficulty: 'hard', personality: 'calm', rng: () => 0.5 });
+  m3.board.squares.fill(null);
+  m3.board.castlingRights = { wK: false, wQ: false, bK: false, bQ: false };
+  m3.board.squares[toSq(0, 4)] = { id: 1, type: 'king', color: 'white', hasMoved: true };
+  m3.board.squares[toSq(7, 4)] = { id: 2, type: 'rook', color: 'black', hasMoved: true };
+  m3.board.squares[toSq(7, 0)] = { id: 3, type: 'king', color: 'black', hasMoved: true };
+  m3.activeActor = 'player';
+  m3.deck.drawPile = ['SKIP'];
+  m3.deck.discardPile = ['SKIP'];
+
+  const fbEv = m3.drawCard();
+  assert.equal(fbEv[0].type, 'CARD_DRAWN');
+  if (fbEv[0].type === 'CARD_DRAWN') {
+    assert.equal(fbEv[0].convertedFromCheckSkip, true);
+  }
+  assert.equal(m3.phase, 'PLAYER_MOVE_LOOP');
+  assert.equal(m3.movesLeft, 1);
+});
+
+test('Online coin flip camera holds full 4.35s+7.4s choreography and logo double-click never closes game', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { resolveOnlineAutoCamera } = await import('./onlineCamera');
+
+  // Coin flip camera timings cover the full 4.35s coin flight (+ 2.9s revolver shot)
+  const survivedCam = resolveOnlineAutoCamera({
+    prevPhase: 'AWAIT_COIN_CHOICE',
+    prevActiveSeat: 'host',
+    nextPhase: 'AWAIT_DRAW_CARD',
+    nextActiveSeat: 'guest',
+    yourSeat: 'host',
+    events: [{ type: 'COIN_RESOLVED', drawer: 'host', guesser: 'guest', actual: 'heads', guessed: 'heads', guessedRight: true }],
+  });
+  assert.equal(survivedCam.immediatePreset, 'CAM_COIN_FLIP');
+  assert.equal(survivedCam.delayMs, 4950);
+
+  const shotCam = resolveOnlineAutoCamera({
+    prevPhase: 'AWAIT_COIN_CHOICE',
+    prevActiveSeat: 'host',
+    nextPhase: 'AWAIT_DRAW_CARD',
+    nextActiveSeat: 'guest',
+    yourSeat: 'host',
+    events: [{ type: 'COIN_RESOLVED', drawer: 'host', guesser: 'guest', actual: 'tails', guessed: 'heads', guessedRight: false }],
+  });
+  assert.equal(shotCam.immediatePreset, 'CAM_COIN_FLIP');
+  assert.equal(shotCam.delayMs, 7400);
+
+  // Title logo is inert (pointer-events-none, no onClick/onDoubleClick) and Tauri Windows guard blocks HTSYSMENU dblclick
+  const titleSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/TitleScreen.tsx'), 'utf8');
+  assert.match(titleSrc, /data-testid="title-brand-logo"[\s\S]{0,120}pointer-events-none/);
+  const hudSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/GameHud.tsx'), 'utf8');
+  assert.equal(/onDoubleClick/i.test(hudSrc), false);
+  const tauriLib = fs.readFileSync(path.resolve(process.cwd(), 'src-tauri/src/lib.rs'), 'utf8');
+  assert.match(tauriLib, /WM_NCLBUTTONDBLCLK/);
+  assert.match(tauriLib, /HTSYSMENU/);
+});
+
+test('Active online session persistence (chuno_active_online_session), 2-min TTL expiry, reconnect backoff, and countdown helpers', async () => {
+  const {
+    ACTIVE_ONLINE_SESSION_KEY,
+    ACTIVE_ONLINE_SESSION_MAX_AGE_MS,
+    saveActiveOnlineSession,
+    loadActiveOnlineSession,
+    clearActiveOnlineSession,
+    computeReconnectBackoffMs,
+    getReconnectRemainingSeconds,
+  } = await import('./onlineClient');
+  const { getTranslations } = await import('./localization');
+
+  assert.equal(ACTIVE_ONLINE_SESSION_KEY, 'chuno_active_online_session');
+  assert.equal(ACTIVE_ONLINE_SESSION_MAX_AGE_MS, 120_000);
+
+  // In-memory Storage mock
+  const store = new Map<string, string>();
+  const mockStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      store.set(k, v);
+    },
+    removeItem: (k: string) => {
+      store.delete(k);
+    },
+  };
+
+  const t0 = 1_700_000_000_000;
+  saveActiveOnlineSession(
+    {
+      roomCode: 'ch-7k2m',
+      playerToken: 'PT-RECON-1234',
+      mode: 'survival',
+      opponentNickname: 'RivalAce',
+      updatedAt: t0,
+    },
+    mockStorage,
+  );
+
+  // Valid within 2-minute window
+  const loaded = loadActiveOnlineSession({ storage: mockStorage, now: t0 + 45_000 });
+  assert.ok(loaded);
+  assert.equal(loaded.roomCode, 'CH-7K2M');
+  assert.equal(loaded.playerToken, 'PT-RECON-1234');
+  assert.equal(loaded.mode, 'survival');
+  assert.equal(loaded.opponentNickname, 'RivalAce');
+
+  // Expired after 2 minutes -> automatically removed and returns null
+  const expired = loadActiveOnlineSession({ storage: mockStorage, now: t0 + 120_001 });
+  assert.equal(expired, null);
+  assert.equal(store.has(ACTIVE_ONLINE_SESSION_KEY), false);
+
+  // Explicit clear removes saved session immediately (e.g. on resign / gameover)
+  saveActiveOnlineSession(
+    { roomCode: 'CH-9999', playerToken: 'PT-CLR-9999', mode: 'classic', opponentNickname: 'Bob', updatedAt: t0 },
+    mockStorage,
+  );
+  assert.equal(store.has(ACTIVE_ONLINE_SESSION_KEY), true);
+  clearActiveOnlineSession(mockStorage);
+  assert.equal(store.has(ACTIVE_ONLINE_SESSION_KEY), false);
+
+  // Exponential backoff: 1s -> 2s -> 4s (capped at 4s)
+  assert.equal(computeReconnectBackoffMs(1), 1000);
+  assert.equal(computeReconnectBackoffMs(2), 2000);
+  assert.equal(computeReconnectBackoffMs(3), 4000);
+  assert.equal(computeReconnectBackoffMs(5), 4000);
+
+  // Countdown helper with server clock offset
+  const deadline = t0 + 90_000;
+  assert.equal(getReconnectRemainingSeconds(deadline, 0, t0), 90);
+  assert.equal(getReconnectRemainingSeconds(deadline, 5_000, t0 + 10_000), 75);
+  assert.equal(getReconnectRemainingSeconds(deadline, 0, t0 + 95_000), 0);
+
+  // Localized reconnect strings in EN / RU / UZ
+  for (const lang of ['en', 'ru', 'uz'] as const) {
+    const t = getTranslations(lang);
+    assert.ok(t.onlineReconnectBannerBtn.length > 3);
+    assert.ok(t.onlineOpponentDisconnectedBanner.length > 5);
+    assert.ok(t.onlineOpponentReconnectedNotice.length > 5);
+    assert.ok(t.onlineReconnectingOverlay.length > 5);
+  }
 });

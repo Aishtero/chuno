@@ -37,11 +37,14 @@ export type OnlineMatchEndReason =
   | 'fifty_move'
   | 'draw_agreed'
   | 'resignation'
-  | 'disconnect_forfeit';
+  | 'disconnect_forfeit'
+  | 'disconnect_timeout';
 
 export type RoomErrorCode =
   | 'ROOM_NOT_FOUND'
   | 'ROOM_FULL'
+  | 'ROOM_IN_PROGRESS'
+  | 'SEAT_RESERVED'
   | 'NOT_YOUR_TURN'
   | 'INVALID_PHASE'
   | 'INVALID_ACTION'
@@ -53,6 +56,7 @@ export interface OnlinePlayerSlot {
   avatarId: string;
   friendCode?: string | null;
   connected: boolean;
+  disconnected?: boolean;
   ready: boolean;
   rematchRequested: boolean;
   color: PieceColor;
@@ -60,6 +64,7 @@ export interface OnlinePlayerSlot {
   thinkTimeMs: number;
   turnsCount: number;
   disconnectedAt: number | null;
+  reconnectDeadline?: number | null;
 }
 
 export interface OnlineResurrectOption {
@@ -83,6 +88,8 @@ export interface OnlineMatchEvent {
   card?: CardType;
   reshuffled?: boolean;
   convertedFromResurrect?: boolean;
+  redrawReason?: 'check_skip';
+  convertedFromCheckSkip?: boolean;
   move?: ChessMove;
   isCheck?: boolean;
   captured?: boolean;
@@ -214,6 +221,99 @@ export function buildRoomInviteUrl(roomCode: string): string {
 }
 
 const SESSION_TOKEN_KEY = 'chuno_mp_player_token';
+export const ACTIVE_ONLINE_SESSION_KEY = 'chuno_active_online_session';
+export const ACTIVE_ONLINE_SESSION_MAX_AGE_MS = 120_000;
+
+export interface ActiveOnlineSession {
+  roomCode: string;
+  playerToken: string;
+  mode: OnlineMode;
+  opponentNickname: string;
+  updatedAt: number;
+}
+
+export function saveActiveOnlineSession(
+  session: Omit<ActiveOnlineSession, 'updatedAt'> & { updatedAt?: number },
+  storage?: Pick<Storage, 'setItem'>,
+): ActiveOnlineSession {
+  const payload: ActiveOnlineSession = {
+    roomCode: session.roomCode.trim().toUpperCase(),
+    playerToken: session.playerToken.trim(),
+    mode: session.mode === 'survival' ? 'survival' : 'classic',
+    opponentNickname: session.opponentNickname.trim() || 'Opponent',
+    updatedAt: session.updatedAt ?? Date.now(),
+  };
+  try {
+    const target =
+      storage ?? (typeof window !== 'undefined' ? window.localStorage : undefined);
+    target?.setItem(ACTIVE_ONLINE_SESSION_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore storage quota errors
+  }
+  return payload;
+}
+
+export function clearActiveOnlineSession(storage?: Pick<Storage, 'removeItem'>): void {
+  try {
+    const target =
+      storage ?? (typeof window !== 'undefined' ? window.localStorage : undefined);
+    target?.removeItem(ACTIVE_ONLINE_SESSION_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function loadActiveOnlineSession(opts?: {
+  storage?: Pick<Storage, 'getItem' | 'removeItem'>;
+  now?: number;
+}): ActiveOnlineSession | null {
+  try {
+    const target =
+      opts?.storage ?? (typeof window !== 'undefined' ? window.localStorage : undefined);
+    const raw = target?.getItem(ACTIVE_ONLINE_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ActiveOnlineSession>;
+    const roomCode = typeof parsed.roomCode === 'string' ? parsed.roomCode.trim().toUpperCase() : '';
+    const playerToken = typeof parsed.playerToken === 'string' ? parsed.playerToken.trim() : '';
+    const updatedAt = typeof parsed.updatedAt === 'number' && Number.isFinite(parsed.updatedAt) ? parsed.updatedAt : 0;
+    const nowTs = opts?.now ?? Date.now();
+    if (!/^CH-[A-Z0-9]{4}$/.test(roomCode) || playerToken.length < 4 || updatedAt <= 0) {
+      target?.removeItem(ACTIVE_ONLINE_SESSION_KEY);
+      return null;
+    }
+    if (nowTs - updatedAt > ACTIVE_ONLINE_SESSION_MAX_AGE_MS) {
+      target?.removeItem(ACTIVE_ONLINE_SESSION_KEY);
+      return null;
+    }
+    return {
+      roomCode,
+      playerToken,
+      mode: parsed.mode === 'survival' ? 'survival' : 'classic',
+      opponentNickname:
+        typeof parsed.opponentNickname === 'string' && parsed.opponentNickname.trim().length > 0
+          ? parsed.opponentNickname.trim()
+          : 'Opponent',
+      updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function computeReconnectBackoffMs(attempt: number): number {
+  const safeAttempt = Math.max(1, Math.floor(attempt));
+  return Math.min(4000, 1000 * 2 ** (safeAttempt - 1));
+}
+
+export function getReconnectRemainingSeconds(
+  deadlineMs: number | null | undefined,
+  serverClockOffsetMs = 0,
+  nowMs: number = Date.now(),
+): number {
+  if (typeof deadlineMs !== 'number' || !Number.isFinite(deadlineMs)) return 0;
+  const serverNow = nowMs + serverClockOffsetMs;
+  return Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000));
+}
 
 export function getOrCreatePlayerToken(): string {
   try {
@@ -368,10 +468,25 @@ export interface OnlineSocialUpdateEvent {
   sentAt: number;
 }
 
+export interface OnlineOpponentDisconnectedEvent {
+  type: 'opponent_disconnected';
+  disconnectedRole: SeatRole;
+  reconnectDeadline: number;
+  roomCode: string;
+}
+
+export interface OnlineOpponentReconnectedEvent {
+  type: 'opponent_reconnected';
+  reconnectedRole: SeatRole;
+  roomCode: string;
+}
+
 export interface OnlineClientCallbacks {
   onStatus?: (status: OnlineConnectionStatus) => void;
   onState?: (state: OnlineRoomView, events?: OnlineMatchEvent[]) => void;
   onMatchEnded?: (summary: OnlineMatchEndSummary, state: OnlineRoomView) => void;
+  onOpponentDisconnected?: (event: OnlineOpponentDisconnectedEvent) => void;
+  onOpponentReconnected?: (event: OnlineOpponentReconnectedEvent) => void;
   onEmote?: (event: OnlineEmoteEvent) => void;
   onSocialUpdate?: (event: OnlineSocialUpdateEvent) => void;
   onError?: (code: RoomErrorCode | 'CONNECTION_ERROR', message: string) => void;
@@ -401,6 +516,10 @@ export class OnlineRoomClient {
     this.serverUrl = serverUrl.replace(/\/+$/, '');
   }
 
+  public getCurrentPlayerToken(): string {
+    return this.lastJoinPayload?.playerToken ?? getOrCreatePlayerToken();
+  }
+
   public connect(params: {
     roomCode: string;
     nickname: string;
@@ -414,6 +533,10 @@ export class OnlineRoomClient {
   }): void {
     this.closedManually = false;
     this.reconnectAttempts = 0;
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.lastJoinPayload = {
       ...params,
       roomCode: params.roomCode.trim().toUpperCase(),
@@ -477,6 +600,8 @@ export class OnlineRoomClient {
           | { type: 'joined'; state: OnlineRoomView }
           | { type: 'room_state'; state: OnlineRoomView; events?: OnlineMatchEvent[] }
           | { type: 'match_ended'; summary: OnlineMatchEndSummary; state: OnlineRoomView }
+          | OnlineOpponentDisconnectedEvent
+          | OnlineOpponentReconnectedEvent
           | OnlineEmoteEvent
           | OnlineSocialUpdateEvent
           | { type: 'error'; code: RoomErrorCode; message: string };
@@ -487,11 +612,23 @@ export class OnlineRoomClient {
           this.callbacks.onState?.(msg.state, msg.events);
         } else if (msg.type === 'match_ended') {
           this.callbacks.onMatchEnded?.(msg.summary, msg.state);
+        } else if (msg.type === 'opponent_disconnected') {
+          this.callbacks.onOpponentDisconnected?.(msg);
+        } else if (msg.type === 'opponent_reconnected') {
+          this.callbacks.onOpponentReconnected?.(msg);
         } else if (msg.type === 'emote_event') {
           this.callbacks.onEmote?.(msg);
         } else if (msg.type === 'social_update') {
           this.callbacks.onSocialUpdate?.(msg);
         } else if (msg.type === 'error') {
+          if (
+            msg.code === 'ROOM_NOT_FOUND' ||
+            msg.code === 'ROOM_FULL' ||
+            msg.code === 'ROOM_IN_PROGRESS' ||
+            msg.code === 'SEAT_RESERVED'
+          ) {
+            this.closedManually = true;
+          }
           this.callbacks.onError?.(msg.code, msg.message);
         }
       } catch {
@@ -506,10 +643,10 @@ export class OnlineRoomClient {
         this.callbacks.onStatus?.('idle');
         return;
       }
-      if (this.reconnectAttempts < 6) {
+      if (this.reconnectAttempts < 10) {
         this.reconnectAttempts++;
         this.callbacks.onStatus?.('reconnecting');
-        const delay = Math.min(4000, 600 * this.reconnectAttempts);
+        const delay = computeReconnectBackoffMs(this.reconnectAttempts);
         this.reconnectTimer = window.setTimeout(() => this.openSocket(true), delay);
       } else {
         this.callbacks.onStatus?.('error');

@@ -327,9 +327,10 @@ export class ChUnoSceneController {
   private revealCardStart = new THREE.Vector3(1.56, 0.25, 0.22);
   private revealCardEnd = new THREE.Vector3(0.1, 1.18, 1.05);
 
-  // Coin animation state (~4.35s Buckshot-Roulette choreography)
+  // Coin animation state (~4.35s Buckshot-Roulette choreography, wall-clock synced)
   private coinAnim = {
     active: false,
+    startedAt: 0,
     elapsed: 0,
     duration: 4.35,
     result: 'heads' as CoinSide,
@@ -337,9 +338,10 @@ export class ChUnoSceneController {
     slammed: false,
   };
 
-  // 4-stage Revolver shot choreography (~2.25s)
+  // 4-stage Revolver shot choreography (~2.90s, wall-clock synced)
   private revolverAnim = {
     active: false,
+    startedAt: 0,
     elapsed: 0,
     duration: 2.25,
     target: 'opponent' as MatchActor,
@@ -437,6 +439,19 @@ export class ChUnoSceneController {
         __chunoSceneDebug?: {
           getNightState: () => { current: number; target: number };
           setNightProgress: (target: number, snap?: boolean) => void;
+          getCoinAnimState: () => {
+            active: boolean;
+            elapsed: number;
+            duration: number;
+            result: CoinSide;
+            thrower: MatchActor;
+            cameraPreset: CameraPreset;
+            hasCoinMesh: boolean;
+            coinVisible: boolean;
+            coinPos: { x: number; y: number; z: number } | null;
+          };
+          triggerCoinFlip: (result: CoinSide, thrower?: MatchActor) => void;
+          setCameraPreset: (preset: CameraPreset) => void;
         };
       }).__chunoSceneDebug = {
         getNightState: () => this.getUnknownNightState(),
@@ -446,6 +461,29 @@ export class ChUnoSceneController {
             this.currentNight = this.targetNight;
             this.applyLightAtmosphere(this.currentNight, this.elapsedTime);
           }
+        },
+        getCoinAnimState: () => ({
+          active: this.coinAnim.active,
+          elapsed: this.coinAnim.elapsed,
+          duration: this.coinAnim.duration,
+          result: this.coinAnim.result,
+          thrower: this.coinAnim.thrower,
+          cameraPreset: this.cameraPreset,
+          hasCoinMesh: Boolean(this.coinMesh),
+          coinVisible: Boolean(this.coinMesh?.visible),
+          coinPos: this.coinMesh
+            ? {
+                x: Number(this.coinMesh.position.x.toFixed(3)),
+                y: Number(this.coinMesh.position.y.toFixed(3)),
+                z: Number(this.coinMesh.position.z.toFixed(3)),
+              }
+            : null,
+        }),
+        triggerCoinFlip: (result: CoinSide, thrower: MatchActor = 'opponent') => {
+          this.triggerCoinFlip(result, thrower);
+        },
+        setCameraPreset: (preset: CameraPreset) => {
+          this.setCameraPreset(preset);
         },
       };
     }
@@ -2144,9 +2182,17 @@ export class ChUnoSceneController {
   }
 
   public triggerCoinFlip(result: CoinSide, thrower: MatchActor = 'opponent'): void {
+    if (!this.coinMesh && this.survivalBundle?.coinMesh) {
+      this.coinMesh = this.survivalBundle.coinMesh;
+    }
+    if (this.coinMesh) {
+      this.coinMesh.visible = true;
+      this.coinMesh.scale.setScalar(1);
+    }
     _coinFocusPos.set(1.44, 0.015, 0.74);
     this.coinAnim = {
       active: true,
+      startedAt: performance.now(),
       elapsed: 0,
       duration: 4.35,
       result,
@@ -2159,6 +2205,7 @@ export class ChUnoSceneController {
     const baseCyl = this.revolverRig ? this.revolverRig.cylinderPivot.rotation.z : 0;
     this.revolverAnim = {
       active: true,
+      startedAt: performance.now(),
       elapsed: 0,
       duration: target === 'player' ? 2.9 : 2.75,
       target,
@@ -2519,9 +2566,9 @@ export class ChUnoSceneController {
       }
     }
 
-    // 6. Buckshot-Roulette 5-Phase Coin Flip Choreography (0..4.35s)
+    // 6. Buckshot-Roulette 5-Phase Coin Flip Choreography (0..4.35s, wall-clock synced)
     if (this.coinMesh && this.coinAnim.active) {
-      this.coinAnim.elapsed += dt;
+      this.coinAnim.elapsed = Math.max(0, (now - this.coinAnim.startedAt) / 1000);
       const e = Math.min(this.coinAnim.elapsed, this.coinAnim.duration);
       const isOpp = this.coinAnim.thrower === 'opponent';
       const tableX = 1.44;
@@ -2655,7 +2702,7 @@ export class ChUnoSceneController {
     // 7. Cinematic 5-Stage Revolver Shot Choreography with Rigid Grip Attachment
     // Scenario A (Dealer -> Player): 2.90s | Scenario B (Player FPS -> Dealer): 2.75s
     if (this.revolverRig && this.revolverAnim.active) {
-      this.revolverAnim.elapsed += dt;
+      this.revolverAnim.elapsed = Math.max(0, (now - this.revolverAnim.startedAt) / 1000);
       const e = Math.min(this.revolverAnim.elapsed, this.revolverAnim.duration);
       const rev = this.revolverRig;
       const hitPlayer = this.revolverAnim.target === 'player';

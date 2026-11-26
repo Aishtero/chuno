@@ -1483,16 +1483,20 @@ export function buildCoinMesh(bank: MaterialBank): THREE.Group {
       map: heads.map,
       bumpMap: heads.bump,
       bumpScale: 0.008,
-      roughness: 0.2,
-      metalness: 0.78,
+      emissive: 0x3b2a08,
+      emissiveIntensity: 0.3,
+      roughness: 0.24,
+      metalness: 0.58,
     }));
     const tailsMat = markShared(new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: tails.map,
       bumpMap: tails.bump,
       bumpScale: 0.008,
-      roughness: 0.24,
-      metalness: 0.78,
+      emissive: 0x2c1b06,
+      emissiveIntensity: 0.28,
+      roughness: 0.28,
+      metalness: 0.58,
     }));
 
     const discGeo = markShared(new THREE.CylinderGeometry(0.155, 0.155, 0.026, 28));

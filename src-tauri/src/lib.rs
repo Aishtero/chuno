@@ -82,6 +82,63 @@ fn save_profile_backup(app: tauri::AppHandle, json: String) -> Result<(), String
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+mod win_titlebar_guard {
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicIsize, Ordering};
+
+    const GWLP_WNDPROC: i32 = -4;
+    const WM_NCLBUTTONDBLCLK: u32 = 0x00A3;
+    const HTSYSMENU: usize = 3;
+
+    static ORIG_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetWindowLongPtrW(hwnd: isize, index: i32, new_long: isize) -> isize;
+        fn CallWindowProcW(
+            prev: isize,
+            hwnd: isize,
+            msg: u32,
+            wparam: usize,
+            lparam: isize,
+        ) -> isize;
+    }
+
+    unsafe extern "system" fn guard_wndproc(
+        hwnd: isize,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        // Block Windows default behavior where double-clicking the top-left app icon/logo
+        // (HTSYSMENU) sends WM_SYSCOMMAND(SC_CLOSE) and immediately closes the game.
+        if msg == WM_NCLBUTTONDBLCLK && wparam == HTSYSMENU {
+            return 0;
+        }
+        let prev = ORIG_WNDPROC.load(Ordering::Relaxed);
+        if prev != 0 {
+            CallWindowProcW(prev, hwnd, msg, wparam, lparam)
+        } else {
+            0
+        }
+    }
+
+    pub fn install(hwnd: *mut c_void) {
+        let raw_hwnd = hwnd as isize;
+        if raw_hwnd == 0 {
+            return;
+        }
+        unsafe {
+            let new_proc = guard_wndproc as *const () as isize;
+            let prev = SetWindowLongPtrW(raw_hwnd, GWLP_WNDPROC, new_proc);
+            if prev != 0 && prev != new_proc {
+                ORIG_WNDPROC.store(prev, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default().plugin(tauri_plugin_process::init());
@@ -92,6 +149,15 @@ pub fn run() {
     }
 
     builder
+        .setup(|_app| {
+            #[cfg(target_os = "windows")]
+            if let Some(window) = _app.get_webview_window("main") {
+                if let Ok(hwnd) = window.hwnd() {
+                    win_titlebar_guard::install(hwnd.0);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_profile_backup,
             save_profile_backup

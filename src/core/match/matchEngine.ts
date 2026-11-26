@@ -57,7 +57,15 @@ export interface MatchStats {
 }
 
 export type MatchEvent =
-  | { type: 'CARD_DRAWN'; actor: MatchActor; card: CardType; reshuffled: boolean; convertedFromResurrect?: boolean }
+  | {
+      type: 'CARD_DRAWN';
+      actor: MatchActor;
+      card: CardType;
+      reshuffled: boolean;
+      convertedFromResurrect?: boolean;
+      redrawReason?: 'check_skip';
+      convertedFromCheckSkip?: boolean;
+    }
   | { type: 'PIECE_MOVED'; actor: MatchActor; move: ChessMove; isCheck: boolean; captured: boolean; streakInterrupted: boolean }
   | { type: 'SKIP_TURN'; actor: MatchActor }
   | { type: 'BOARD_REVERSED'; actor: MatchActor; newPlayerColor: PieceColor }
@@ -453,6 +461,40 @@ export class MatchEngine {
     }
 
     if (card === 'SKIP') {
+      const activeColor = this.getActiveColor();
+      if (this.board.isInCheck(activeColor)) {
+        // Under Check, Skip is cancelled and discarded so the active side draws again to defend their King.
+        // Infinite-loop safeguard: if no non-SKIP card exists in drawPile/discardPile, convert to 1 regular move.
+        const hasNonSkipCard =
+          this.deck.drawPile.some((c) => c !== 'SKIP') ||
+          this.deck.discardPile.some((c) => c !== 'SKIP');
+        if (!hasNonSkipCard) {
+          this.movesLeft = 1;
+          this.phase = 'PLAYER_MOVE_LOOP';
+          events.push({
+            type: 'CARD_DRAWN',
+            actor: this.activeActor,
+            card,
+            reshuffled,
+            convertedFromCheckSkip: true,
+          });
+          return events;
+        }
+        let reshuffledNow = reshuffled;
+        if (this.deck.drawPile.length === 0) {
+          this.deck.reshuffleDiscard();
+          reshuffledNow = true;
+        }
+        this.phase = 'AWAIT_DRAW_CARD';
+        events.push({
+          type: 'CARD_DRAWN',
+          actor: this.activeActor,
+          card,
+          reshuffled: reshuffledNow,
+          redrawReason: 'check_skip',
+        });
+        return events;
+      }
       events.push({ type: 'CARD_DRAWN', actor: this.activeActor, card, reshuffled });
       events.push({ type: 'SKIP_TURN', actor: this.activeActor });
       events.push(...this.advanceTurn());
